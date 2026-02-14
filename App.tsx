@@ -877,21 +877,21 @@ export default function App() {
         </div>
 
         {/* Docked Bottom Nav */}
-        <div className="fixed bottom-0 left-0 right-0 z-40 pb-safe bg-white/80 backdrop-blur-xl border-t border-slate-200/60 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
-            <div className="flex justify-around items-center px-6 py-3 max-w-md mx-auto">
+        <div className="fixed bottom-0 left-0 right-0 z-40 pb-safe bg-white/90 backdrop-blur-xl border-t border-slate-200/60 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+            <div className="flex justify-around items-center px-6 py-2 max-w-md mx-auto">
                 <button 
                     onClick={() => setActiveTab('home')}
-                    className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-all active:scale-95 ${activeTab === 'home' ? 'text-indigo-600 bg-indigo-50/50' : 'text-slate-400'}`}
+                    className={`flex flex-col items-center gap-0.5 p-1.5 rounded-xl transition-all active:scale-95 ${activeTab === 'home' ? 'text-indigo-600 bg-indigo-50/50' : 'text-slate-400'}`}
                 >
-                    <span className={`material-symbols-rounded text-[28px] ${activeTab === 'home' ? 'fill-1' : ''}`}>home</span>
+                    <span className={`material-symbols-rounded text-[24px] ${activeTab === 'home' ? 'fill-1' : ''}`}>home</span>
                     <span className="text-[10px] font-bold">Trang chủ</span>
                 </button>
 
                 <button 
                     onClick={() => setActiveTab('history')}
-                    className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-all active:scale-95 ${activeTab === 'history' ? 'text-indigo-600 bg-indigo-50/50' : 'text-slate-400'}`}
+                    className={`flex flex-col items-center gap-0.5 p-1.5 rounded-xl transition-all active:scale-95 ${activeTab === 'history' ? 'text-indigo-600 bg-indigo-50/50' : 'text-slate-400'}`}
                 >
-                    <span className={`material-symbols-rounded text-[28px] ${activeTab === 'history' ? 'fill-1' : ''}`}>calendar_month</span>
+                    <span className={`material-symbols-rounded text-[24px] ${activeTab === 'history' ? 'fill-1' : ''}`}>calendar_month</span>
                     <span className="text-[10px] font-bold">Lịch sử</span>
                 </button>
             </div>
