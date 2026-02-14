@@ -515,10 +515,10 @@ export default function App() {
                      </p>
                  </div>
                  
-                 {/* QUICK DEPOSIT BUTTON */}
+                 {/* QUICK DEPOSIT BUTTON - FIXED STYLE TO AVOID WHITE/INVISIBLE ISSUE */}
                  <button 
                      onClick={handleMeoDeposit}
-                     className="bg-white/20 backdrop-blur-md px-3 py-2 rounded-xl text-xs font-bold text-white flex items-center gap-1 hover:bg-white/30 transition-all active:scale-95 border border-white/10"
+                     className="bg-emerald-500 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1 shadow-lg shadow-emerald-900/20 active:scale-95 transition-all border border-emerald-400/50"
                  >
                      <span className="material-symbols-rounded text-base">add_circle</span>
                      Nạp 300k
