@@ -42,7 +42,8 @@ export default function App() {
   const [transferTo, setTransferTo] = useState<AccountType>(AccountType.CASH);
   
   // Constant Base Fee (Initial Deposit/Credit)
-  const BASE_FEE = 300000;
+  // UPDATE: Set to 0 as requested. Mèo has no initial deposit.
+  const BASE_FEE = 0;
 
   // Initial Data Fetching
   useEffect(() => {
@@ -86,10 +87,25 @@ export default function App() {
   
   // Calculate Debt
   const activeTransactions = transactions.filter(t => !t.isSettled && t.type !== TransactionType.TRANSFER && t.type !== TransactionType.SETTLEMENT && t.type !== TransactionType.INCOME);
-  const transactionDebt = activeTransactions.reduce((sum, t) => {
-      if (t.splitType === SplitType.MEO_ONLY) return sum + t.amount;
-      if (t.splitType === SplitType.SHARED) return sum + (t.amount / 2);
-      if (t.splitType === SplitType.MEO_PAID) return sum - t.amount;
+  
+  // Logic: Nợ = Chi tiêu (cho Mèo) - Các khoản Mèo đã đóng (INCOME + MEO_PAID)
+  // Tuy nhiên, logic hiện tại đang tách biệt.
+  // Để đơn giản:
+  // 1. TransactionDebt tính toán các khoản chi tiêu chưa thanh toán.
+  // 2. Nếu có Income từ Mèo (SplitType.MEO_PAID), nó sẽ làm giảm nợ.
+  const transactionDebt = transactions
+    .filter(t => !t.isSettled && t.type !== TransactionType.TRANSFER && t.type !== TransactionType.SETTLEMENT)
+    .reduce((sum, t) => {
+      // Nếu là chi tiêu
+      if (t.type === TransactionType.EXPENSE) {
+          if (t.splitType === SplitType.MEO_ONLY) return sum + t.amount;
+          if (t.splitType === SplitType.SHARED) return sum + (t.amount / 2);
+          if (t.splitType === SplitType.MEO_PAID) return sum - t.amount; // Mèo trả hộ -> Tôi nợ Mèo (Giảm nợ của Mèo)
+      }
+      // Nếu là thu nhập (Mèo đóng tiền)
+      if (t.type === TransactionType.INCOME && t.splitType === SplitType.MEO_PAID) {
+          return sum - t.amount; // Mèo đóng tiền -> Giảm nợ
+      }
       return sum;
     }, 0);
   
@@ -157,7 +173,8 @@ export default function App() {
     const tx = transactions.find(t => t.id === id);
     if (!tx) return;
 
-    if (tx.isSettled && tx.type !== TransactionType.SETTLEMENT) {
+    if (tx.isSettled && tx.type !== TransactionType.SETTLEMENT && tx.type !== TransactionType.INCOME) {
+        // Allow deleting settled INCOME if it was a fund deposit
         alert('Giao dịch này đã được quyết toán (lock). Vui lòng xoá Bill (Thanh toán nợ) tương ứng trước để mở khoá.');
         return;
     }
@@ -168,11 +185,9 @@ export default function App() {
   const confirmDelete = async () => {
     if (!deletingTx) return;
     const { id, amount, accountId, toAccountId, type, splitType } = deletingTx;
-    const oldAccounts = [...accounts];
 
     // Calculate new balances locally to send to DB
     const updates: { id: string, amount: number }[] = [];
-
     const getAccountBalance = (accId: string) => accounts.find(a => a.id === accId)?.balance || 0;
 
     if (type === TransactionType.TRANSFER && toAccountId) {
@@ -183,13 +198,20 @@ export default function App() {
         // Single account impact
         let newBalance = getAccountBalance(accountId);
         
-        if (type === TransactionType.SETTLEMENT || type === TransactionType.INCOME || splitType === SplitType.MEO_PAID) {
-            // These added money, so deleting subtracts it
+        // LOGIC XOÁ: Đảo ngược lại hành động lúc tạo
+        if (type === TransactionType.INCOME || type === TransactionType.SETTLEMENT) {
+            // Lúc tạo là cộng tiền -> Xoá là trừ tiền
             newBalance -= amount;
-        } else {
-            // Expenses subtracted money, so deleting adds it back
-            newBalance += amount;
+        } else if (type === TransactionType.EXPENSE) {
+             if (splitType === SplitType.MEO_PAID) {
+                 // Lúc tạo là Mèo trả cho mình (Cộng tiền) -> Xoá là trừ tiền
+                 newBalance -= amount;
+             } else {
+                 // Lúc tạo là chi tiêu (Trừ tiền) -> Xoá là cộng tiền
+                 newBalance += amount;
+             }
         }
+
         updates.push({ id: accountId, amount: newBalance });
     }
 
@@ -224,10 +246,50 @@ export default function App() {
     } catch (error) {
         console.error("Error deleting transaction", error);
         alert("Có lỗi khi xoá giao dịch!");
-        // Rollback local state isn't strictly necessary if we crash here, but a reload fixes it
     }
     
     setDeletingTx(null);
+  };
+
+  // TÍNH NĂNG MỚI: Mèo nạp quỹ 300k
+  const handleMeoDeposit = async () => {
+    const AMOUNT = 300000;
+    const mbAcc = accounts.find(a => a.id === AccountType.MB);
+    if (!mbAcc) {
+        alert("Không tìm thấy ví MB Bank!");
+        return;
+    }
+
+    // Xác nhận
+    if (!window.confirm("Xác nhận Mèo đóng quỹ 300.000đ vào MB Bank?")) return;
+
+    // Tạo giao dịch Income
+    const newTx: Transaction = {
+        id: Date.now().toString(),
+        date: new Date().toISOString(),
+        description: "Mèo đóng quỹ",
+        amount: AMOUNT,
+        accountId: AccountType.MB,
+        splitType: SplitType.MEO_PAID, // Đánh dấu là Mèo trả để giảm nợ trong tính toán
+        type: TransactionType.INCOME, // Tiền vào
+        isSettled: false // Chưa settle để hiển thị trong lịch sử tính toán (như một khoản giảm trừ)
+    };
+
+    const newBalance = mbAcc.balance + AMOUNT;
+
+    try {
+        await Promise.all([
+            supabaseService.addTransaction(newTx),
+            supabaseService.updateAccountBalance(AccountType.MB, newBalance)
+        ]);
+        
+        // Update Local State
+        setTransactions(prev => [newTx, ...prev]);
+        setAccounts(prev => prev.map(a => a.id === AccountType.MB ? {...a, balance: newBalance} : a));
+    } catch (e) {
+        console.error("Lỗi nạp quỹ", e);
+        alert("Lỗi kết nối khi nạp quỹ.");
+    }
   };
 
   const handleQuickAdd = async () => {
@@ -452,13 +514,15 @@ export default function App() {
                          {formatCurrency(Math.abs(meoDebt))}
                      </p>
                  </div>
-                 {(meoDebt !== 0) && (
-                     <span className={`text-xs px-2 py-1 rounded-lg text-white font-bold ${
-                         isCredit ? 'bg-emerald-500/80' : 'bg-rose-500/80'
-                     }`}>
-                         {activeTransactions.length === 0 ? 'Đầu kỳ' : (isCredit ? 'Dư tiền' : 'Chưa trả')}
-                     </span>
-                 )}
+                 
+                 {/* QUICK DEPOSIT BUTTON */}
+                 <button 
+                     onClick={handleMeoDeposit}
+                     className="bg-white/20 backdrop-blur-md px-3 py-2 rounded-xl text-xs font-bold text-white flex items-center gap-1 hover:bg-white/30 transition-all active:scale-95 border border-white/10"
+                 >
+                     <span className="material-symbols-rounded text-base">add_circle</span>
+                     Nạp 300k
+                 </button>
              </div>
          </div>
       </div>
@@ -630,7 +694,11 @@ export default function App() {
               );
           }
           if (historyFilter === 'MEO') {
-              return (t.splitType === SplitType.SHARED || t.splitType === SplitType.MEO_ONLY || t.splitType === SplitType.MEO_PAID) && t.type !== TransactionType.SETTLEMENT;
+              // Hiển thị cả Thu nhập do Mèo đóng (INCOME + MEO_PAID)
+              return (
+                  (t.splitType === SplitType.SHARED || t.splitType === SplitType.MEO_ONLY || t.splitType === SplitType.MEO_PAID) 
+                  && t.type !== TransactionType.SETTLEMENT
+              );
           }
           return true;
       });
@@ -696,7 +764,7 @@ export default function App() {
                                                 onClick={() => isSettlement && handleViewBill(t)}
                                                 className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
                                                 isSettlement ? 'bg-purple-100 text-purple-600' :
-                                                isMeoPaid ? 'bg-emerald-100 text-emerald-600' :
+                                                isMeoPaid || (isIncome && isMeoPaid) ? 'bg-emerald-100 text-emerald-600' :
                                                 isIncome ? 'bg-emerald-100 text-emerald-600' :
                                                 isTransfer ? 'bg-indigo-50 text-indigo-600' :
                                                 'bg-slate-100 text-slate-500'
@@ -727,7 +795,7 @@ export default function App() {
                                                      )}
                                                      {isIncome && (
                                                         <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-emerald-100 text-emerald-700">
-                                                            Thu nhập
+                                                            {isMeoPaid ? 'Mèo đóng quỹ' : 'Thu nhập'}
                                                         </span>
                                                      )}
                                                 </div>
@@ -746,7 +814,7 @@ export default function App() {
                                                 </div>
                                                 
                                                 {/* Delete Button */}
-                                                {!t.isSettled || t.type === TransactionType.SETTLEMENT ? (
+                                                {!t.isSettled || t.type === TransactionType.SETTLEMENT || (t.type === TransactionType.INCOME && t.splitType === SplitType.MEO_PAID) ? (
                                                     <button 
                                                         onClick={(e) => {
                                                             e.stopPropagation();
@@ -927,6 +995,7 @@ export default function App() {
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
                 <div className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" onClick={() => setDeletingTx(null)}></div>
                 <div className="bg-white w-full max-w-sm rounded-[32px] p-6 shadow-2xl relative z-10 animate-scale-up">
+                    <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-8"></div>
                     <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-500 flex items-center justify-center mb-4 mx-auto">
                         <span className="material-symbols-rounded text-2xl">delete</span>
                     </div>

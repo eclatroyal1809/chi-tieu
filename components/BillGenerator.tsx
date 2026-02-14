@@ -25,7 +25,7 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
   const [step, setStep] = useState<'preview' | 'confirm'>('preview');
   const [payAmount, setPayAmount] = useState('');
 
-  const BASE_FEE = 300000; // Quỹ đầu kỳ
+  const BASE_FEE = 0; // Updated to 0 as requested
 
   // Filter transactions
   // Nếu là lịch sử: Hiển thị tất cả transactions được truyền vào (đã filter ở App)
@@ -51,6 +51,9 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
   // LOGIC CHANGE: Total Debt = Expenses - Initial Deposit
   const totalDebt = transactionDebt - BASE_FEE;
   const isCredit = totalDebt < 0; // Surplus/Credit scenario
+
+  // Check if we should show the base fee row
+  const showBaseFee = BASE_FEE > 0;
 
   // Formatting helpers
   const formatNumberInput = (value: string) => {
@@ -143,14 +146,16 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
                             )}
                         </div>
 
-                        {/* Fixed Base Fee Item - DISPLAY AS CREDIT */}
-                        <div className="flex justify-between items-start mb-3 pb-3 border-b border-slate-100">
-                            <div>
-                                <p className="font-bold text-emerald-600">1. Quỹ đầu kỳ (Đã đóng)</p>
-                                <p className="text-xs text-slate-500 italic">Trừ vào tổng chi</p>
+                        {/* Fixed Base Fee Item - DISPLAY AS CREDIT (Only if > 0) */}
+                        {showBaseFee && (
+                            <div className="flex justify-between items-start mb-3 pb-3 border-b border-slate-100">
+                                <div>
+                                    <p className="font-bold text-emerald-600">1. Quỹ đầu kỳ (Đã đóng)</p>
+                                    <p className="text-xs text-slate-500 italic">Trừ vào tổng chi</p>
+                                </div>
+                                <span className="font-bold text-emerald-600">-{formatCurrency(BASE_FEE)}</span>
                             </div>
-                            <span className="font-bold text-emerald-600">-{formatCurrency(BASE_FEE)}</span>
-                        </div>
+                        )}
 
                         {/* Dynamic Items */}
                         <div className="space-y-3 pb-4 border-b-2 border-dashed border-slate-300">
@@ -159,11 +164,12 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
                             ) : (
                                 activeTransactions.map((t, idx) => {
                                     const isPayment = t.splitType === SplitType.MEO_PAID;
+                                    const orderNum = idx + (showBaseFee ? 2 : 1);
                                     return (
                                         <div key={t.id} className="flex justify-between items-start">
                                             <div className="pr-2 max-w-[70%]">
                                                 <p className={`font-bold ${isPayment ? 'text-emerald-600' : 'text-slate-800'}`}>
-                                                    {idx + 2}. {t.description}
+                                                    {orderNum}. {t.description}
                                                 </p>
                                                 <p className="text-[10px] text-slate-400">
                                                     {formatDate(t.date)} - {
@@ -189,7 +195,7 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
                         <div className="pt-4">
                             <div className="flex justify-between items-center mb-1 text-slate-500 text-xs">
                                 <span>Số lượng khoản mục:</span>
-                                <span>{activeTransactions.length + 1}</span>
+                                <span>{activeTransactions.length + (showBaseFee ? 1 : 0)}</span>
                             </div>
                             <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-900">
                                 <span className="text-lg font-bold uppercase">
