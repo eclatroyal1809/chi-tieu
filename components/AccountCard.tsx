@@ -58,11 +58,6 @@ export const AccountCard: React.FC<AccountCardProps> = ({ account, onUpdateBalan
             </div>
             <span className="font-medium text-sm text-white/90 truncate max-w-[80px]">{account.name}</span>
         </div>
-        {/* Visa-like chip just for visuals */}
-        <div className="w-8 h-5 rounded bg-yellow-200/80 overflow-hidden relative opacity-80">
-            <div className="absolute top-1 left-0 right-0 h-[1px] bg-black/20"></div>
-            <div className="absolute bottom-1 left-0 right-0 h-[1px] bg-black/20"></div>
-        </div>
       </div>
 
       <div className="mt-auto z-10">

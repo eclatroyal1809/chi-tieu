@@ -3,6 +3,7 @@ import { AccountType, Account, Transaction, SplitType, TransactionType } from '.
 import { INITIAL_ACCOUNTS, SPLIT_OPTIONS } from './constants';
 import { AccountCard } from './components/AccountCard';
 import { BillGenerator } from './components/BillGenerator';
+import { MonthlyStats } from './components/MonthlyStats';
 import * as supabaseService from './services/supabaseService';
 import { supabase } from './supabaseClient'; // Import to check config
 
@@ -204,8 +205,7 @@ export default function App() {
             newBalance -= amount;
         } else if (type === TransactionType.EXPENSE) {
              if (splitType === SplitType.MEO_PAID) {
-                 // Lúc tạo là Mèo trả cho mình (Cộng tiền) -> Xoá là trừ tiền
-                 newBalance -= amount;
+                 // Mèo chi -> Không ảnh hưởng số dư -> Xoá cũng không đổi
              } else {
                  // Lúc tạo là chi tiêu (Trừ tiền) -> Xoá là cộng tiền
                  newBalance += amount;
@@ -318,15 +318,22 @@ export default function App() {
         newBalance += amountVal;
     } else {
         // Expense
-        const isMeoPayingMe = qaSplit === SplitType.MEO_PAID;
-        newBalance = isMeoPayingMe ? newBalance + amountVal : newBalance - amountVal;
+        if (qaSplit === SplitType.MEO_PAID) {
+             // Mèo chi -> Không trừ tiền của mình
+        } else {
+             newBalance -= amountVal;
+        }
     }
 
     try {
-        await Promise.all([
-            supabaseService.addTransaction(newTx),
-            supabaseService.updateAccountBalance(qaAccount, newBalance)
-        ]);
+        const promises: Promise<any>[] = [supabaseService.addTransaction(newTx)];
+        
+        // Chỉ update balance nếu có thay đổi
+        if (newBalance !== currentAcc.balance) {
+            promises.push(supabaseService.updateAccountBalance(qaAccount, newBalance));
+        }
+
+        await Promise.all(promises);
 
         // Optimistic UI Update
         setTransactions(prev => [newTx, ...prev]);
@@ -527,6 +534,9 @@ export default function App() {
          </div>
       </div>
 
+      {/* Monthly Stats */}
+      <MonthlyStats transactions={transactions} />
+
       {/* Quick Add */}
       <div>
          <div className="bg-white rounded-[32px] p-5 shadow-lg shadow-slate-200/50 border border-slate-100 relative overflow-hidden">
@@ -593,7 +603,7 @@ export default function App() {
              </div>
 
              <div className="mb-5">
-                 <div className="flex gap-3 overflow-x-auto no-scrollbar pb-1">
+                 <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
                      {[AccountType.MB, AccountType.TCB, AccountType.CASH].map(type => {
                          const acc = accounts.find(a => a.id === type);
                          if(!acc) return null;
@@ -602,9 +612,9 @@ export default function App() {
                             <button
                                 key={acc.id}
                                 onClick={() => setQaAccount(acc.id as AccountType)}
-                                className={`flex items-center gap-2 px-4 py-2.5 rounded-2xl text-sm font-bold border transition-all whitespace-nowrap active:scale-95 ${
+                                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all whitespace-nowrap active:scale-95 ${
                                     isSelected 
-                                    ? `bg-slate-800 text-white border-slate-800 shadow-lg shadow-slate-200` 
+                                    ? `bg-slate-800 text-white border-slate-800 shadow-md shadow-slate-200` 
                                     : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
                                 }`}
                             >
