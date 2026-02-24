@@ -40,6 +40,7 @@ export const AccountCard: React.FC<AccountCardProps> = ({ account, onUpdateBalan
       case AccountType.MB: return 'from-blue-600 to-blue-800';
       case AccountType.TCB: return 'from-red-500 to-red-700';
       case AccountType.SAVING: return 'from-purple-500 to-indigo-600';
+      case AccountType.TET_SAVING: return 'from-pink-500 to-rose-600';
       case AccountType.CASH: return 'from-emerald-500 to-emerald-700';
       default: return 'from-slate-500 to-slate-700';
     }

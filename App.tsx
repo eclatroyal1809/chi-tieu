@@ -42,6 +42,10 @@ export default function App() {
   const [transferFrom, setTransferFrom] = useState<AccountType>(AccountType.MB);
   const [transferTo, setTransferTo] = useState<AccountType>(AccountType.CASH);
   
+  // Edit TET_SAVING State
+  const [isEditingTetSaving, setIsEditingTetSaving] = useState(false);
+  const [tempTetSavingBalance, setTempTetSavingBalance] = useState('');
+  
   // Constant Base Fee (Initial Deposit/Credit)
   // UPDATE: Set to 0 as requested. Mèo has no initial deposit.
   const BASE_FEE = 0;
@@ -62,6 +66,7 @@ export default function App() {
         try {
             // Seed initial accounts if first run
             await supabaseService.seedAccountsIfEmpty(INITIAL_ACCOUNTS);
+            await supabaseService.ensureTetSavingExists(INITIAL_ACCOUNTS);
             
             // Fetch data concurrently
             const [fetchedAccounts, fetchedTransactions] = await Promise.all([
@@ -371,20 +376,54 @@ export default function App() {
       isSettled: true
     };
 
-    const newFromBalance = fromAcc.balance - amountVal;
-    const newToBalance = toAcc.balance + amountVal;
+    let newFromBalance = fromAcc.balance;
+    let newToBalance = toAcc.balance;
+    let mbBalanceUpdate: number | null = null;
+
+    if (transferFrom === AccountType.MB && transferTo === AccountType.TET_SAVING) {
+        // MB -> TET_SAVING: MB (Thực tế) unchanged, TET_SAVING increases
+        newFromBalance = fromAcc.balance;
+        newToBalance = toAcc.balance + amountVal;
+    } else if (transferFrom === AccountType.TET_SAVING && transferTo === AccountType.MB) {
+        // TET_SAVING -> MB: MB (Thực tế) unchanged, TET_SAVING decreases
+        newFromBalance = fromAcc.balance - amountVal;
+        newToBalance = toAcc.balance;
+    } else if (transferTo === AccountType.TET_SAVING) {
+        // Other -> TET_SAVING: Other decreases, TET_SAVING increases, MB (Thực tế) increases
+        newFromBalance = fromAcc.balance - amountVal;
+        newToBalance = toAcc.balance + amountVal;
+        const mbAcc = accounts.find(a => a.id === AccountType.MB);
+        if (mbAcc) mbBalanceUpdate = mbAcc.balance + amountVal;
+    } else if (transferFrom === AccountType.TET_SAVING) {
+        // TET_SAVING -> Other: TET_SAVING decreases, Other increases, MB (Thực tế) decreases
+        newFromBalance = fromAcc.balance - amountVal;
+        newToBalance = toAcc.balance + amountVal;
+        const mbAcc = accounts.find(a => a.id === AccountType.MB);
+        if (mbAcc) mbBalanceUpdate = mbAcc.balance - amountVal;
+    } else {
+        // Normal transfer
+        newFromBalance = fromAcc.balance - amountVal;
+        newToBalance = toAcc.balance + amountVal;
+    }
 
     try {
-        await Promise.all([
+        const promises = [
             supabaseService.addTransaction(newTx),
             supabaseService.updateAccountBalance(transferFrom, newFromBalance),
             supabaseService.updateAccountBalance(transferTo, newToBalance)
-        ]);
+        ];
+        
+        if (mbBalanceUpdate !== null) {
+            promises.push(supabaseService.updateAccountBalance(AccountType.MB, mbBalanceUpdate));
+        }
+
+        await Promise.all(promises);
 
         setTransactions(prev => [newTx, ...prev]);
         setAccounts(prev => prev.map(acc => {
             if (acc.id === transferFrom) return { ...acc, balance: newFromBalance };
             if (acc.id === transferTo) return { ...acc, balance: newToBalance };
+            if (mbBalanceUpdate !== null && acc.id === AccountType.MB) return { ...acc, balance: mbBalanceUpdate };
             return acc;
         }));
 
@@ -640,8 +679,8 @@ export default function App() {
                                     className={`px-3 py-3 rounded-2xl text-sm font-medium border text-left flex items-center gap-3 transition-all active:scale-95 ${
                                         isSelected
                                         ? (isMeoPaid 
-                                            ? 'bg-emerald-50 border-emerald-500 text-emerald-800 shadow-sm' 
-                                            : 'bg-indigo-50 border-indigo-500 text-indigo-700 shadow-sm')
+                                            ? 'bg-cyan-50 border-cyan-500 text-cyan-800 shadow-sm' 
+                                            : 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm')
                                         : 'bg-white border-slate-200 text-slate-500'
                                     }`}
                                  >
@@ -661,8 +700,8 @@ export default function App() {
                  disabled={!qaAmount || !qaDesc}
                  className={`w-full py-4 rounded-2xl font-bold text-lg text-white shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2 ${
                     !qaAmount || !qaDesc ? 'bg-slate-300 opacity-50 shadow-none' : 
-                    qaType === TransactionType.INCOME ? 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-200' :
-                    qaSplit === SplitType.MEO_PAID ? 'bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'
+                    qaType === TransactionType.INCOME ? 'bg-cyan-500 hover:bg-cyan-600 shadow-cyan-200' :
+                    qaSplit === SplitType.MEO_PAID ? 'bg-cyan-600 hover:bg-cyan-700 shadow-cyan-200' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-200'
                  }`}
              >
                  <span className="material-symbols-rounded text-2xl">check</span>
@@ -677,14 +716,92 @@ export default function App() {
             <h3 className="font-bold text-slate-800 text-lg">Ví của tôi</h3>
             <button 
                 onClick={() => setShowTransfer(true)}
-                className="text-xs font-bold text-indigo-600 bg-indigo-50 active:bg-indigo-100 px-4 py-2 rounded-full flex items-center gap-1 transition-all active:scale-95"
+                className="text-xs font-bold text-blue-600 bg-blue-50 active:bg-blue-100 px-4 py-2 rounded-full flex items-center gap-1 transition-all active:scale-95"
             >
                 <span className="material-symbols-rounded text-lg">swap_horiz</span>
                 Chuyển tiền
             </button>
         </div>
+
+        {/* Tiết kiệm ăn Tết */}
+        <div className="bg-gradient-to-br from-pink-500 to-rose-600 rounded-3xl p-5 text-white shadow-lg shadow-pink-200 mb-4 relative overflow-hidden">
+            <div className="absolute -top-10 -right-10 w-40 h-40 bg-white opacity-10 rounded-full blur-2xl"></div>
+            <div className="flex justify-between items-center relative z-10">
+                <div className="flex-1 mr-4">
+                    <p className="text-pink-100 text-sm font-medium mb-1 flex items-center gap-1">
+                        <span className="material-symbols-rounded text-sm">celebration</span>
+                        Tiết kiệm ăn Tết
+                    </p>
+                    {isEditingTetSaving ? (
+                        <input
+                            type="text"
+                            inputMode="numeric"
+                            className="w-full text-3xl font-bold tracking-tight border-b border-white/50 focus:border-white focus:outline-none bg-transparent placeholder-white/50"
+                            value={tempTetSavingBalance}
+                            onChange={(e) => setTempTetSavingBalance(formatNumberInput(e.target.value))}
+                            autoFocus
+                            onBlur={() => {
+                                const raw = tempTetSavingBalance.replace(/\./g, '');
+                                const val = parseFloat(raw);
+                                if (!isNaN(val)) {
+                                    handleUpdateBalance(AccountType.TET_SAVING, val);
+                                }
+                                setIsEditingTetSaving(false);
+                            }}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                    const raw = tempTetSavingBalance.replace(/\./g, '');
+                                    const val = parseFloat(raw);
+                                    if (!isNaN(val)) {
+                                        handleUpdateBalance(AccountType.TET_SAVING, val);
+                                    }
+                                    setIsEditingTetSaving(false);
+                                }
+                            }}
+                        />
+                    ) : (
+                        <h2 
+                            className="text-3xl font-bold tracking-tight cursor-pointer"
+                            onClick={() => {
+                                setTempTetSavingBalance(formatNumberInput((accounts.find(a => a.id === AccountType.TET_SAVING)?.balance || 0).toString()));
+                                setIsEditingTetSaving(true);
+                            }}
+                        >
+                            {formatCurrency(accounts.find(a => a.id === AccountType.TET_SAVING)?.balance || 0)}
+                        </h2>
+                    )}
+                    <div className="mt-3 bg-white/10 rounded-xl p-3 border border-white/10 flex gap-4">
+                        <div className="flex-1">
+                            <p className="text-[10px] text-pink-100 mb-0.5 uppercase tracking-wider font-medium">Thực tế</p>
+                            <p className="text-sm font-bold">
+                                {formatCurrency(accounts.find(a => a.id === AccountType.MB)?.balance || 0)}
+                            </p>
+                        </div>
+                        <div className="w-px bg-white/20"></div>
+                        <div className="flex-1">
+                            <p className="text-[10px] text-pink-100 mb-0.5 uppercase tracking-wider font-medium">Khả dụng</p>
+                            <p className="text-sm font-bold">
+                                {formatCurrency((accounts.find(a => a.id === AccountType.MB)?.balance || 0) - (accounts.find(a => a.id === AccountType.TET_SAVING)?.balance || 0))}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                <button 
+                    onClick={() => {
+                        setTransferFrom(AccountType.MB);
+                        setTransferTo(AccountType.TET_SAVING);
+                        setShowTransfer(true);
+                    }}
+                    className="bg-white/20 hover:bg-white/30 active:scale-95 transition-all p-3 rounded-2xl border border-white/10 flex flex-col items-center justify-center gap-1 min-w-[80px]"
+                >
+                    <span className="material-symbols-rounded text-white block">add_card</span>
+                    <span className="text-[10px] font-bold">Gửi thêm</span>
+                </button>
+            </div>
+        </div>
+
         <div className="grid grid-cols-2 gap-3">
-            {accounts.map(acc => (
+            {accounts.filter(acc => acc.id !== AccountType.TET_SAVING).map(acc => (
                 <AccountCard key={acc.id} account={acc} onUpdateBalance={handleUpdateBalance} />
             ))}
         </div>

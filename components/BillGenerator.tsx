@@ -31,10 +31,15 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
   // Nếu là lịch sử: Hiển thị tất cả transactions được truyền vào (đã filter ở App)
   // Nếu là tạo mới: Chỉ hiển thị những cái chưa settle
   const activeTransactions = isHistorical 
-    ? transactions 
+    ? transactions.filter(t => 
+        t.splitType === SplitType.MEO_ONLY || 
+        t.splitType === SplitType.SHARED || 
+        t.splitType === SplitType.MEO_PAID
+      )
     : transactions.filter(t => 
         !t.isSettled && 
         t.type !== TransactionType.TRANSFER &&
+        t.type !== TransactionType.SETTLEMENT &&
         (t.splitType === SplitType.MEO_ONLY || 
          t.splitType === SplitType.SHARED || 
          t.splitType === SplitType.MEO_PAID)
@@ -77,9 +82,37 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
   const handleDownloadImage = async () => {
     setIsCapturing(true);
     const element = document.getElementById('bill-receipt-node');
-    if (!element) return;
+    const scrollContainer = element?.parentElement;
+    
+    if (!element || !scrollContainer) {
+        setIsCapturing(false);
+        return;
+    }
+
+    // Save original styles
+    const originalOverflow = scrollContainer.style.overflow;
+    const originalHeight = scrollContainer.style.height;
+    const originalMaxHeight = scrollContainer.style.maxHeight;
+    const parentFlex = scrollContainer.style.flex;
+    
+    // Temporarily remove scroll constraints to capture full height
+    scrollContainer.style.overflow = 'visible';
+    scrollContainer.style.height = 'auto';
+    scrollContainer.style.maxHeight = 'none';
+    scrollContainer.style.flex = 'none';
+
+    // Also need to modify the modal container to not constrain height
+    const modalContainer = scrollContainer.parentElement;
+    let originalModalMaxHeight = '';
+    if (modalContainer) {
+        originalModalMaxHeight = modalContainer.style.maxHeight;
+        modalContainer.style.maxHeight = 'none';
+    }
 
     try {
+        // Small delay to allow DOM to update
+        await new Promise(resolve => setTimeout(resolve, 100));
+
         const canvas = await html2canvas(element, {
             scale: 2, // Higher resolution
             backgroundColor: '#ffffff',
@@ -96,6 +129,16 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
         console.error("Export failed", err);
         alert("Không thể xuất ảnh. Vui lòng thử lại.");
     } finally {
+        // Restore original styles
+        scrollContainer.style.overflow = originalOverflow;
+        scrollContainer.style.height = originalHeight;
+        scrollContainer.style.maxHeight = originalMaxHeight;
+        scrollContainer.style.flex = parentFlex;
+        
+        if (modalContainer) {
+            modalContainer.style.maxHeight = originalModalMaxHeight;
+        }
+        
         setIsCapturing(false);
     }
   };
@@ -128,37 +171,37 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
         {step === 'preview' ? (
             <>
                 {/* Receipt Content - This part gets captured */}
-                <div className="flex-1 overflow-y-auto bg-slate-200 p-4 flex justify-center">
+                <div className="flex-1 overflow-y-auto bg-slate-200 p-4 flex justify-center items-start">
                     <div 
                         id="bill-receipt-node" 
-                        className="bg-white w-full max-w-sm shadow-sm relative text-slate-800 p-6 font-mono text-sm leading-relaxed"
-                        style={{ fontFamily: "'Space Mono', monospace" }}
+                        className="bg-white w-full max-w-sm shadow-md relative text-slate-800 p-8 font-mono text-sm leading-relaxed h-fit"
+                        style={{ fontFamily: "'Space Mono', 'Courier New', monospace" }}
                     >
                         {/* Receipt Header */}
-                        <div className="text-center border-b-2 border-dashed border-slate-300 pb-4 mb-4">
-                            <h1 className="text-2xl font-bold text-slate-900 uppercase tracking-widest">HOÁ ĐƠN</h1>
-                            <p className="text-xs text-slate-500 mt-1">
+                        <div className="text-center pb-6 mb-6 relative">
+                            <h1 className="text-3xl font-bold text-slate-900 uppercase tracking-[0.2em] mb-3">HOÁ ĐƠN</h1>
+                            <p className="text-sm text-slate-500 mb-1">
                                 Ngày: {new Date(historicalDate || new Date().toISOString()).toLocaleDateString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
                             </p>
-                            <p className="text-xs text-slate-500">Khách hàng: {MEO_NAME}</p>
+                            <p className="text-sm text-slate-500">Khách hàng: {MEO_NAME}</p>
                             {isHistorical && (
-                                <span className="inline-block mt-1 px-2 py-0.5 bg-slate-100 text-[10px] font-bold text-slate-500 border border-slate-300 rounded">LỊCH SỬ</span>
+                                <span className="inline-block mt-2 px-2 py-0.5 bg-slate-100 text-[10px] font-bold text-slate-500 border border-slate-300 rounded">LỊCH SỬ</span>
                             )}
+                            <div className="absolute bottom-0 left-0 right-0 border-b-2 border-dashed border-slate-300"></div>
                         </div>
 
                         {/* Fixed Base Fee Item - DISPLAY AS CREDIT (Only if > 0) */}
                         {showBaseFee && (
-                            <div className="flex justify-between items-start mb-3 pb-3 border-b border-slate-100">
+                            <div className="flex justify-between items-start mb-4 pb-4 border-b border-slate-100">
                                 <div>
-                                    <p className="font-bold text-emerald-600">1. Quỹ đầu kỳ (Đã đóng)</p>
-                                    <p className="text-xs text-slate-500 italic">Trừ vào tổng chi</p>
+                                    <p className="font-bold text-emerald-600 text-base">1. Quỹ đầu kỳ (Đã đóng)</p>
                                 </div>
-                                <span className="font-bold text-emerald-600">-{formatCurrency(BASE_FEE)}</span>
+                                <span className="font-bold text-emerald-600 text-base">-{formatCurrency(BASE_FEE)}</span>
                             </div>
                         )}
 
                         {/* Dynamic Items */}
-                        <div className="space-y-3 pb-4 border-b-2 border-dashed border-slate-300">
+                        <div className="space-y-5 pb-6 relative">
                             {activeTransactions.length === 0 ? (
                                 <p className="text-center text-slate-400 italic py-2">Không có giao dịch phát sinh</p>
                             ) : (
@@ -167,19 +210,16 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
                                     const orderNum = idx + (showBaseFee ? 2 : 1);
                                     return (
                                         <div key={t.id} className="flex justify-between items-start">
-                                            <div className="pr-2 max-w-[70%]">
-                                                <p className={`font-bold ${isPayment ? 'text-emerald-600' : 'text-slate-800'}`}>
+                                            <div className="pr-4 flex-1">
+                                                <p className={`font-bold text-base mb-1 ${isPayment ? 'text-emerald-600' : 'text-slate-800'}`}>
                                                     {orderNum}. {t.description}
                                                 </p>
-                                                <p className="text-[10px] text-slate-400">
-                                                    {formatDate(t.date)} - {
-                                                        isPayment ? 'Đã trả' :
-                                                        t.splitType === SplitType.SHARED ? '50%' : '100%'
-                                                    }
+                                                <p className="text-sm text-slate-400">
+                                                    {formatDate(t.date)}
                                                 </p>
                                             </div>
-                                            <div className="text-right whitespace-nowrap">
-                                                <span className={`font-bold ${isPayment ? 'text-emerald-600' : 'text-slate-800'}`}>
+                                            <div className="text-right whitespace-nowrap pt-0.5">
+                                                <span className={`font-bold text-lg ${isPayment ? 'text-emerald-600' : 'text-slate-800'}`}>
                                                     {isPayment ? '-' : ''}{formatCurrency(
                                                         t.splitType === SplitType.SHARED ? t.amount / 2 : t.amount
                                                     )}
@@ -189,19 +229,24 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
                                     );
                                 })
                             )}
+                            <div className="absolute bottom-0 left-0 right-0 border-b-2 border-dashed border-slate-300"></div>
                         </div>
 
                         {/* Total */}
-                        <div className="pt-4">
-                            <div className="flex justify-between items-center mb-1 text-slate-500 text-xs">
-                                <span>Số lượng khoản mục:</span>
-                                <span>{activeTransactions.length + (showBaseFee ? 1 : 0)}</span>
+                        <div className="pt-6">
+                            <div className="flex justify-between items-center mb-3 text-slate-500 text-sm">
+                                <span>SỐ LƯỢNG KHOẢN MỤC:</span>
+                                <span className="font-bold text-slate-700">{activeTransactions.length + (showBaseFee ? 1 : 0)}</span>
                             </div>
-                            <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-900">
-                                <span className="text-lg font-bold uppercase">
-                                    {isCredit ? 'DƯ (MÈO CÓ)' : 'TỔNG CỘNG'}
+                            <div className="flex justify-between items-center mb-6 text-slate-500 text-sm">
+                                <span>TỔNG CHI TIÊU:</span>
+                                <span className="font-bold text-slate-700">{formatCurrency(activeTransactions.reduce((sum, t) => t.type === TransactionType.EXPENSE ? sum + t.amount : sum, 0))}</span>
+                            </div>
+                            <div className="flex justify-between items-center mt-2 pt-6 border-t-2 border-dashed border-slate-300">
+                                <span className="text-xl font-bold uppercase tracking-wider">
+                                    {isCredit ? 'DƯ (MÈO CÓ)' : 'MÈO CẦN TRẢ'}
                                 </span>
-                                <span className={`text-2xl font-bold tracking-tight ${isCredit ? 'text-emerald-600' : 'text-slate-900'}`}>
+                                <span className={`text-2xl font-black tracking-tight ${isCredit ? 'text-emerald-600' : 'text-slate-900'}`}>
                                     {formatCurrency(Math.abs(totalDebt))}
                                 </span>
                             </div>
@@ -219,26 +264,16 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
                                     (Số tiền này sẽ được trừ vào kỳ sau)
                                 </p>
                             )}
-                            <div className="text-center mt-6 text-[10px] text-slate-400 uppercase tracking-widest">
+                            <div className="text-center mt-8 text-[10px] text-slate-400 uppercase tracking-widest">
                                 *** Cảm ơn quý khách ***
                             </div>
+                            
+                            {/* Barcode */}
+                            <div className="mt-6 flex flex-col items-center justify-center opacity-50">
+                                <div className="h-10 w-full max-w-[200px] bg-[repeating-linear-gradient(90deg,transparent,transparent_2px,#0f172a_2px,#0f172a_4px,transparent_4px,transparent_5px,#0f172a_5px,#0f172a_8px,transparent_8px,transparent_10px,#0f172a_10px,#0f172a_11px)]"></div>
+                                <p className="text-[10px] tracking-[0.3em] mt-2 font-mono">MEO-{historicalDate ? new Date(historicalDate).getTime().toString().slice(-6) : Date.now().toString().slice(-6)}</p>
+                            </div>
                         </div>
-
-                        {/* Jagged Bottom Edge */}
-                        <div 
-                            className="absolute -bottom-3 left-0 right-0 h-3 bg-slate-200"
-                            style={{
-                                maskImage: 'linear-gradient(45deg, transparent 75%, black 75%), linear-gradient(-45deg, transparent 75%, black 75%)',
-                                maskSize: '10px 10px',
-                                maskPosition: '0 0, 5px 0',
-                                maskRepeat: 'repeat-x',
-                                WebkitMaskImage: 'linear-gradient(45deg, transparent 75%, black 75%), linear-gradient(-45deg, transparent 75%, black 75%)',
-                                WebkitMaskSize: '10px 10px',
-                                WebkitMaskPosition: '0 0, 5px 0',
-                                WebkitMaskRepeat: 'repeat-x',
-                                backgroundColor: '#F1F5F9'
-                            }}
-                        ></div>
                     </div>
                 </div>
 

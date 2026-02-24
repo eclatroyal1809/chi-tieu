@@ -68,6 +68,24 @@ export const seedAccountsIfEmpty = async (initialAccounts: Account[]) => {
     return false; // Already exists
 };
 
+export const ensureTetSavingExists = async (initialAccounts: Account[]) => {
+    const { data } = await supabase.from('accounts').select('id').eq('id', 'TET_SAVING');
+    if (!data || data.length === 0) {
+        const tetSaving = initialAccounts.find(a => a.id === 'TET_SAVING');
+        if (tetSaving) {
+            // Initialize with 295,000 as requested by user
+            const dbData = {
+                id: tetSaving.id,
+                name: tetSaving.name,
+                balance: 295000,
+                color: tetSaving.color,
+                icon: tetSaving.icon
+            };
+            await supabase.from('accounts').insert([dbData]);
+        }
+    }
+};
+
 // --- TRANSACTIONS ---
 export const getTransactions = async (): Promise<Transaction[]> => {
     const { data, error } = await supabase.from('transactions').select('*').order('date', { ascending: false });

@@ -3,7 +3,8 @@ export enum AccountType {
   CASH = 'CASH',
   MB = 'MB',
   TCB = 'TCB',
-  SAVING = 'SAVING'
+  SAVING = 'SAVING',
+  TET_SAVING = 'TET_SAVING'
 }
 
 export enum SplitType {
