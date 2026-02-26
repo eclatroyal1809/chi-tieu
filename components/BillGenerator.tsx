@@ -156,7 +156,7 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 pt-safe pb-safe backdrop-blur-sm">
       <div className="w-full max-w-md bg-slate-100 rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
         {/* Header Actions */}
         <div className="bg-slate-800 p-4 text-white flex justify-between items-center shrink-0">

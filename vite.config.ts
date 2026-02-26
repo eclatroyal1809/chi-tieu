@@ -18,7 +18,7 @@ export default defineConfig(({ mode }) => {
             name: 'Me & Mèo Finance',
             short_name: 'Mèo Finance',
             description: 'Ứng dụng quản lý tài chính và công nợ cá nhân',
-            theme_color: '#0f172a',
+            theme_color: '#f8fafc',
             background_color: '#f8fafc',
             display: 'standalone',
             icons: [

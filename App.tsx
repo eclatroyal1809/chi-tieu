@@ -527,7 +527,7 @@ export default function App() {
 
   // --- Render (Almost same, just added loading overlay) ---
   const renderHome = () => (
-    <div className="space-y-6 pb-32 animate-fade-in pt-4">
+    <div className="space-y-6 pb-32 animate-fade-in">
       {/* Header Card */}
       <div className="relative overflow-hidden rounded-[32px] bg-gradient-to-br from-[#4F46E5] to-[#7C3AED] p-6 text-white shadow-xl shadow-indigo-200">
          <div className="absolute -top-10 -right-10 w-40 h-40 bg-white opacity-10 rounded-full blur-2xl"></div>
@@ -840,7 +840,7 @@ export default function App() {
       });
 
       return (
-        <div className="pb-32 animate-fade-in pt-4">
+        <div className="pb-32 animate-fade-in">
             <div className="flex items-center justify-between mb-6 px-1">
                 <h2 className="text-2xl font-bold text-slate-800">Lịch sử</h2>
                 
@@ -998,7 +998,7 @@ export default function App() {
             </div>
         )}
 
-        <div className="px-5">
+        <div className="px-5 pt-safe">
           {activeTab === 'home' && renderHome()}
           {activeTab === 'history' && renderHistory()}
         </div>
@@ -1028,7 +1028,7 @@ export default function App() {
         {showTransfer && (
             <div className="fixed inset-0 z-50 flex items-end justify-center">
                 <div className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" onClick={() => setShowTransfer(false)}></div>
-                <div className="bg-white w-full max-w-md rounded-t-[32px] p-6 shadow-2xl animate-slide-up relative z-10 pb-10">
+                <div className="bg-white w-full max-w-md rounded-t-[32px] p-6 shadow-2xl animate-slide-up relative z-10 pb-[calc(env(safe-area-inset-bottom)+2rem)]">
                     <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-8"></div>
                     
                     <h3 className="text-xl font-bold mb-6 flex items-center gap-2 text-slate-800">
@@ -1119,7 +1119,7 @@ export default function App() {
 
         {/* Delete Confirmation Modal */}
         {deletingTx && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pt-safe pb-safe">
                 <div className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" onClick={() => setDeletingTx(null)}></div>
                 <div className="bg-white w-full max-w-sm rounded-[32px] p-6 shadow-2xl relative z-10 animate-scale-up">
                     <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-8"></div>
