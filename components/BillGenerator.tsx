@@ -114,7 +114,7 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
         await new Promise(resolve => setTimeout(resolve, 100));
 
         const canvas = await html2canvas(element, {
-            scale: 2, // Higher resolution
+            scale: 3, // Very high resolution for crisp text
             backgroundColor: '#ffffff',
             useCORS: true,
             logging: false,
@@ -174,18 +174,17 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
                 <div className="flex-1 overflow-y-auto bg-slate-200 p-4 flex justify-center items-start">
                     <div 
                         id="bill-receipt-node" 
-                        className="bg-white w-full max-w-sm shadow-md relative text-slate-800 p-8 font-mono text-sm leading-relaxed h-fit"
-                        style={{ fontFamily: "'Space Mono', 'Courier New', monospace" }}
+                        className="bg-white w-full max-w-sm shadow-md relative text-slate-800 p-8 font-sans text-sm leading-relaxed h-fit"
                     >
                         {/* Receipt Header */}
                         <div className="text-center pb-6 mb-6 relative">
-                            <h1 className="text-3xl font-bold text-slate-900 uppercase tracking-[0.2em] mb-3">HOÁ ĐƠN</h1>
-                            <p className="text-sm text-slate-500 mb-1">
+                            <h1 className="text-3xl font-black text-slate-900 uppercase tracking-widest mb-3">HOÁ ĐƠN</h1>
+                            <p className="text-sm text-slate-500 mb-1 font-medium">
                                 Ngày: {new Date(historicalDate || new Date().toISOString()).toLocaleDateString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
                             </p>
-                            <p className="text-sm text-slate-500">Khách hàng: {MEO_NAME}</p>
+                            <p className="text-sm text-slate-500 font-medium">Khách hàng: {MEO_NAME}</p>
                             {isHistorical && (
-                                <span className="inline-block mt-2 px-2 py-0.5 bg-slate-100 text-[10px] font-bold text-slate-500 border border-slate-300 rounded">LỊCH SỬ</span>
+                                <span className="inline-block mt-3 px-2 py-1 bg-slate-100 text-[10px] font-bold text-slate-500 border border-slate-300 rounded uppercase tracking-wider">Lịch sử</span>
                             )}
                             <div className="absolute bottom-0 left-0 right-0 border-b-2 border-dashed border-slate-300"></div>
                         </div>
@@ -211,15 +210,15 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
                                     return (
                                         <div key={t.id} className="flex justify-between items-start">
                                             <div className="pr-4 flex-1">
-                                                <p className={`font-bold text-base mb-1 ${isPayment ? 'text-emerald-600' : 'text-slate-800'}`}>
+                                                <p className={`font-bold text-base mb-1 leading-tight ${isPayment ? 'text-emerald-600' : 'text-slate-800'}`}>
                                                     {orderNum}. {t.description}
                                                 </p>
-                                                <p className="text-sm text-slate-400">
+                                                <p className="text-sm text-slate-400 font-medium">
                                                     {formatDate(t.date)}
                                                 </p>
                                             </div>
                                             <div className="text-right whitespace-nowrap pt-0.5">
-                                                <span className={`font-bold text-lg ${isPayment ? 'text-emerald-600' : 'text-slate-800'}`}>
+                                                <span className={`font-bold text-lg tabular-nums tracking-tight ${isPayment ? 'text-emerald-600' : 'text-slate-800'}`}>
                                                     {isPayment ? '-' : ''}{formatCurrency(
                                                         t.splitType === SplitType.SHARED ? t.amount / 2 : t.amount
                                                     )}
@@ -234,19 +233,19 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
 
                         {/* Total */}
                         <div className="pt-6">
-                            <div className="flex justify-between items-center mb-3 text-slate-500 text-sm">
+                            <div className="flex justify-between items-center mb-3 text-slate-500 text-sm font-medium">
                                 <span>SỐ LƯỢNG KHOẢN MỤC:</span>
-                                <span className="font-bold text-slate-700">{activeTransactions.length + (showBaseFee ? 1 : 0)}</span>
+                                <span className="font-bold text-slate-700 tabular-nums">{activeTransactions.length + (showBaseFee ? 1 : 0)}</span>
                             </div>
-                            <div className="flex justify-between items-center mb-6 text-slate-500 text-sm">
+                            <div className="flex justify-between items-center mb-6 text-slate-500 text-sm font-medium">
                                 <span>TỔNG CHI TIÊU:</span>
-                                <span className="font-bold text-slate-700">{formatCurrency(activeTransactions.reduce((sum, t) => t.type === TransactionType.EXPENSE ? sum + t.amount : sum, 0))}</span>
+                                <span className="font-bold text-slate-700 tabular-nums">{formatCurrency(activeTransactions.reduce((sum, t) => t.type === TransactionType.EXPENSE ? sum + t.amount : sum, 0))}</span>
                             </div>
                             <div className="flex justify-between items-center mt-2 pt-6 border-t-2 border-dashed border-slate-300">
-                                <span className="text-xl font-bold uppercase tracking-wider">
+                                <span className="text-xl font-black uppercase tracking-wider text-slate-900">
                                     {isCredit ? 'DƯ (MÈO CÓ)' : 'MÈO CẦN TRẢ'}
                                 </span>
-                                <span className={`text-2xl font-black tracking-tight ${isCredit ? 'text-emerald-600' : 'text-slate-900'}`}>
+                                <span className={`text-2xl font-black tracking-tighter tabular-nums ${isCredit ? 'text-emerald-600' : 'text-slate-900'}`}>
                                     {formatCurrency(Math.abs(totalDebt))}
                                 </span>
                             </div>
@@ -269,9 +268,9 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
                             </div>
                             
                             {/* Barcode */}
-                            <div className="mt-6 flex flex-col items-center justify-center opacity-50">
-                                <div className="h-10 w-full max-w-[200px] bg-[repeating-linear-gradient(90deg,transparent,transparent_2px,#0f172a_2px,#0f172a_4px,transparent_4px,transparent_5px,#0f172a_5px,#0f172a_8px,transparent_8px,transparent_10px,#0f172a_10px,#0f172a_11px)]"></div>
-                                <p className="text-[10px] tracking-[0.3em] mt-2 font-mono">MEO-{historicalDate ? new Date(historicalDate).getTime().toString().slice(-6) : Date.now().toString().slice(-6)}</p>
+                            <div className="mt-8 flex flex-col items-center justify-center opacity-60">
+                                <div className="h-12 w-full max-w-[220px] bg-[repeating-linear-gradient(90deg,transparent,transparent_2px,#0f172a_2px,#0f172a_4px,transparent_4px,transparent_5px,#0f172a_5px,#0f172a_8px,transparent_8px,transparent_10px,#0f172a_10px,#0f172a_11px)]"></div>
+                                <p className="text-[11px] tracking-[0.4em] mt-3 font-mono font-bold text-slate-600">MEO-{historicalDate ? new Date(historicalDate).getTime().toString().slice(-6) : Date.now().toString().slice(-6)}</p>
                             </div>
                         </div>
                     </div>
