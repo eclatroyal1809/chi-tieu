@@ -76,9 +76,9 @@ export default function App() {
   const [orders, setOrders] = useState<any[]>([]);
   const [shopFinances, setShopFinances] = useState<any[]>([]);
 
-  const [invForm, setInvForm] = useState({ name: '', originalPrice: '', sellingPrice: '', stock: '1', date: new Date() });
+  const [invForm, setInvForm] = useState({ name: '', originalPrice: '', sellingPrice: '', stock: '1', date: new Date(), accountId: AccountType.MB });
   const [ordForm, setOrdForm] = useState({ channel: 'Shopee', name: '', phone: '', address: '', productId: '', qty: '1', deposit: '', shipping: '', voucher: '', paymentFee: '', status: 'Chưa Gửi Hàng', paymentMethod: 'Đang Thanh Toán' });
-  const [finForm, setFinForm] = useState({ type: 'INCOME', amount: '', desc: '', category: 'Khác', date: new Date() });
+  const [finForm, setFinForm] = useState({ type: 'INCOME', amount: '', desc: '', category: 'Khác', date: new Date(), accountId: AccountType.MB });
   
   const [orderTab, setOrderTab] = useState<'list' | 'create'>('list');
 
@@ -1124,8 +1124,31 @@ export default function App() {
           
           try {
               await supabaseService.addShopProduct(newProd);
+              
+              const totalCost = newProd.originalPrice * newProd.stock;
+              if (totalCost > 0) {
+                  const newTx: Transaction = {
+                      id: Date.now().toString() + '_tx',
+                      date: newProd.importDate,
+                      description: `Nhập hàng ${activeShop.toUpperCase()}: ${newProd.name} (SL: ${newProd.stock})`,
+                      amount: totalCost,
+                      accountId: invForm.accountId,
+                      splitType: SplitType.ME_ONLY,
+                      type: TransactionType.EXPENSE,
+                      isSettled: false
+                  };
+                  await supabaseService.addTransaction(newTx);
+                  
+                  const account = accounts.find(a => a.id === invForm.accountId);
+                  if (account) {
+                      await supabaseService.updateAccountBalance(account.id, account.balance - totalCost);
+                      setAccounts(accounts.map(a => a.id === account.id ? { ...a, balance: a.balance - totalCost } : a));
+                  }
+                  setTransactions([newTx, ...transactions]);
+              }
+              
               setProducts([newProd, ...products]);
-              setInvForm({ name: '', originalPrice: '', sellingPrice: '', stock: '1', date: new Date() });
+              setInvForm({ name: '', originalPrice: '', sellingPrice: '', stock: '1', date: new Date(), accountId: AccountType.MB });
           } catch (error) {
               console.error("Error adding product:", error);
               alert("Lỗi khi thêm sản phẩm");
@@ -1144,9 +1167,18 @@ export default function App() {
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                           <input type="number" placeholder="Số lượng" value={invForm.stock} onChange={e => setInvForm({...invForm, stock: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
-                          <div className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus-within:border-indigo-500 flex items-center">
-                              <DatePicker selected={invForm.date} onChange={(date: Date | null) => date && setInvForm({...invForm, date})} dateFormat="dd/MM/yyyy" locale={vi} formatWeekDay={formatShortWeekday} className="w-full bg-transparent outline-none" wrapperClassName="flex-1" />
-                          </div>
+                          <select 
+                              value={invForm.accountId} 
+                              onChange={e => setInvForm({...invForm, accountId: e.target.value as AccountType})}
+                              className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500"
+                          >
+                              {accounts.map(acc => (
+                                  <option key={acc.id} value={acc.id}>Nguồn: {acc.name}</option>
+                              ))}
+                          </select>
+                      </div>
+                      <div className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus-within:border-indigo-500 flex items-center">
+                          <DatePicker selected={invForm.date} onChange={(date: Date | null) => date && setInvForm({...invForm, date})} dateFormat="dd/MM/yyyy" locale={vi} formatWeekDay={formatShortWeekday} className="w-full bg-transparent outline-none" wrapperClassName="flex-1" />
                       </div>
                       <button onClick={handleAddProduct} className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-md shadow-indigo-200 active:scale-95 transition-all mt-2">Thêm vào kho</button>
                   </div>
@@ -1252,7 +1284,32 @@ export default function App() {
                   };
                   await supabaseService.addShopFinance(newFinance);
                   setShopFinances([newFinance, ...shopFinances]);
-                  alert(`Đã tự động tạo phiếu thu ${formatCurrency(order.netRevenue)} vào Sổ quỹ!`);
+                  
+                  // Create main transaction
+                  let targetAccountId = AccountType.MB;
+                  if (value === 'Tiền Mặt') targetAccountId = AccountType.CASH;
+                  if (value === 'TECHCOMBANK') targetAccountId = AccountType.TCB;
+
+                  const newTx: Transaction = {
+                      id: Date.now().toString() + '_tx',
+                      date: new Date().toISOString(),
+                      description: `Doanh thu ${activeShop.toUpperCase()}: Đơn ${order.channel} - ${order.name}`,
+                      amount: order.netRevenue,
+                      accountId: targetAccountId,
+                      splitType: SplitType.ME_ONLY,
+                      type: TransactionType.INCOME,
+                      isSettled: false
+                  };
+                  await supabaseService.addTransaction(newTx);
+                  
+                  const account = accounts.find(a => a.id === targetAccountId);
+                  if (account) {
+                      await supabaseService.updateAccountBalance(account.id, account.balance + order.netRevenue);
+                      setAccounts(accounts.map(a => a.id === account.id ? { ...a, balance: a.balance + order.netRevenue } : a));
+                  }
+                  setTransactions([newTx, ...transactions]);
+                  
+                  alert(`Đã tự động tạo phiếu thu ${formatCurrency(order.netRevenue)} vào Sổ quỹ và Thu-Chi!`);
               }
               
               setOrders(orders.map(o => o.id === orderId ? updatedOrder : o));
@@ -1440,8 +1497,31 @@ export default function App() {
           
           try {
               await supabaseService.addShopFinance(newFinance);
+              
+              const newTx: Transaction = {
+                  id: Date.now().toString() + '_tx',
+                  date: newFinance.date,
+                  description: `${newFinance.type === 'INCOME' ? 'Doanh thu' : 'Chi phí'} ${activeShop.toUpperCase()}: ${newFinance.description}`,
+                  amount: newFinance.amount,
+                  accountId: finForm.accountId,
+                  splitType: SplitType.ME_ONLY,
+                  type: newFinance.type === 'INCOME' ? TransactionType.INCOME : TransactionType.EXPENSE,
+                  isSettled: false
+              };
+              await supabaseService.addTransaction(newTx);
+              
+              const account = accounts.find(a => a.id === finForm.accountId);
+              if (account) {
+                  const newBalance = newFinance.type === 'INCOME' 
+                      ? account.balance + newFinance.amount 
+                      : account.balance - newFinance.amount;
+                  await supabaseService.updateAccountBalance(account.id, newBalance);
+                  setAccounts(accounts.map(a => a.id === account.id ? { ...a, balance: newBalance } : a));
+              }
+              setTransactions([newTx, ...transactions]);
+              
               setShopFinances([newFinance, ...shopFinances]);
-              setFinForm({ type: 'INCOME', amount: '', desc: '', category: 'Khác', date: new Date() });
+              setFinForm({ type: 'INCOME', amount: '', desc: '', category: 'Khác', date: new Date(), accountId: AccountType.MB });
           } catch (error) {
               console.error("Error adding finance:", error);
               alert("Lỗi khi thêm giao dịch");
@@ -1474,19 +1554,30 @@ export default function App() {
                        <button onClick={() => setFinForm({...finForm, type: 'INCOME'})} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all relative z-10 ${finForm.type === 'INCOME' ? 'text-emerald-600' : 'text-slate-400'}`}>Thu</button>
                        <button onClick={() => setFinForm({...finForm, type: 'EXPENSE'})} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all relative z-10 ${finForm.type === 'EXPENSE' ? 'text-rose-600' : 'text-slate-400'}`}>Chi</button>
                   </div>
-                  <div className="space-y-3">
-                      <input type="text" placeholder="Số tiền" value={finForm.amount} onChange={e => setFinForm({...finForm, amount: formatNumberInput(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500 font-bold" />
-                      <select value={finForm.category} onChange={e => setFinForm({...finForm, category: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500 font-medium">
-                          {FINANCE_CATEGORIES.map(cat => (
-                              <option key={cat} value={cat}>{cat}</option>
-                          ))}
-                      </select>
-                      <input type="text" placeholder="Nội dung" value={finForm.desc} onChange={e => setFinForm({...finForm, desc: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
-                      <div className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus-within:border-indigo-500 flex items-center">
-                          <DatePicker selected={finForm.date} onChange={(date: Date | null) => date && setFinForm({...finForm, date})} dateFormat="dd/MM/yyyy" locale={vi} formatWeekDay={formatShortWeekday} className="w-full bg-transparent outline-none" wrapperClassName="flex-1" />
+                      <div className="space-y-3">
+                          <input type="text" placeholder="Số tiền" value={finForm.amount} onChange={e => setFinForm({...finForm, amount: formatNumberInput(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500 font-bold" />
+                          <div className="grid grid-cols-2 gap-3">
+                              <select value={finForm.category} onChange={e => setFinForm({...finForm, category: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500 font-medium">
+                                  {FINANCE_CATEGORIES.map(cat => (
+                                      <option key={cat} value={cat}>{cat}</option>
+                                  ))}
+                              </select>
+                              <select 
+                                  value={finForm.accountId} 
+                                  onChange={e => setFinForm({...finForm, accountId: e.target.value as AccountType})}
+                                  className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500 font-medium"
+                              >
+                                  {accounts.map(acc => (
+                                      <option key={acc.id} value={acc.id}>Nguồn: {acc.name}</option>
+                                  ))}
+                              </select>
+                          </div>
+                          <input type="text" placeholder="Nội dung" value={finForm.desc} onChange={e => setFinForm({...finForm, desc: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
+                          <div className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus-within:border-indigo-500 flex items-center">
+                              <DatePicker selected={finForm.date} onChange={(date: Date | null) => date && setFinForm({...finForm, date})} dateFormat="dd/MM/yyyy" locale={vi} formatWeekDay={formatShortWeekday} className="w-full bg-transparent outline-none" wrapperClassName="flex-1" />
+                          </div>
+                          <button onClick={handleAddFinance} className="w-full py-3 bg-slate-800 text-white font-bold rounded-xl shadow-md shadow-slate-200 active:scale-95 transition-all mt-2">Lưu giao dịch</button>
                       </div>
-                      <button onClick={handleAddFinance} className="w-full py-3 bg-slate-800 text-white font-bold rounded-xl shadow-md shadow-slate-200 active:scale-95 transition-all mt-2">Lưu giao dịch</button>
-                  </div>
               </div>
 
               <div className="space-y-3">
