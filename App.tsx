@@ -6,6 +6,21 @@ import { BillGenerator } from './components/BillGenerator';
 import { MonthlyStats } from './components/MonthlyStats';
 import * as supabaseService from './services/supabaseService';
 import { supabase } from './supabaseClient'; // Import to check config
+import { motion, AnimatePresence } from 'motion/react';
+import DatePicker from 'react-datepicker';
+import { vi } from 'date-fns/locale';
+
+const formatShortWeekday = (nameOfDay: string) => {
+    const name = nameOfDay.toLowerCase();
+    if (name.includes('chủ nhật')) return 'CN';
+    if (name.includes('hai')) return 'T2';
+    if (name.includes('ba')) return 'T3';
+    if (name.includes('tư')) return 'T4';
+    if (name.includes('năm')) return 'T5';
+    if (name.includes('sáu')) return 'T6';
+    if (name.includes('bảy')) return 'T7';
+    return nameOfDay.substring(0, 3);
+};
 
 export default function App() {
   // State
@@ -14,7 +29,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [configError, setConfigError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'home' | 'history'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'history' | 'shop'>('home');
   const [historyFilter, setHistoryFilter] = useState<'MEO' | 'ME' | 'BILL'>('MEO');
   
   const [showBill, setShowBill] = useState(false);
@@ -22,6 +37,12 @@ export default function App() {
   
   // Delete Confirmation State
   const [deletingTx, setDeletingTx] = useState<Transaction | null>(null);
+
+  // Edit Transaction State
+  const [editingTx, setEditingTx] = useState<Transaction | null>(null);
+  const [editAmount, setEditAmount] = useState('');
+  const [editDesc, setEditDesc] = useState('');
+  const [editDate, setEditDate] = useState<Date>(new Date());
 
   // State for viewing history bill
   const [viewingBill, setViewingBill] = useState<{
@@ -36,6 +57,7 @@ export default function App() {
   const [qaDesc, setQaDesc] = useState('');
   const [qaAccount, setQaAccount] = useState<AccountType>(AccountType.MB);
   const [qaSplit, setQaSplit] = useState<SplitType>(SplitType.SHARED);
+  const [qaDate, setQaDate] = useState<Date>(new Date());
 
   // Transfer State
   const [transferAmount, setTransferAmount] = useState('');
@@ -46,6 +68,20 @@ export default function App() {
   const [isEditingTetSaving, setIsEditingTetSaving] = useState(false);
   const [tempTetSavingBalance, setTempTetSavingBalance] = useState('');
   
+  // Shop State
+  const [activeShop, setActiveShop] = useState<'eclat' | 'elank'>('eclat');
+  const [shopView, setShopView] = useState<'overview' | 'inventory' | 'finance' | 'orders'>('overview');
+
+  const [products, setProducts] = useState<any[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
+  const [shopFinances, setShopFinances] = useState<any[]>([]);
+
+  const [invForm, setInvForm] = useState({ name: '', originalPrice: '', sellingPrice: '', stock: '1', date: new Date() });
+  const [ordForm, setOrdForm] = useState({ channel: 'Shopee', name: '', phone: '', address: '', productId: '', qty: '1', deposit: '', shipping: '', voucher: '', paymentFee: '', status: 'Chưa Gửi Hàng', paymentMethod: 'Đang Thanh Toán' });
+  const [finForm, setFinForm] = useState({ type: 'INCOME', amount: '', desc: '', category: 'Khác', date: new Date() });
+  
+  const [orderTab, setOrderTab] = useState<'list' | 'create'>('list');
+
   // Constant Base Fee (Initial Deposit/Credit)
   // UPDATE: Set to 0 as requested. Mèo has no initial deposit.
   const BASE_FEE = 0;
@@ -69,13 +105,19 @@ export default function App() {
             await supabaseService.ensureTetSavingExists(INITIAL_ACCOUNTS);
             
             // Fetch data concurrently
-            const [fetchedAccounts, fetchedTransactions] = await Promise.all([
+            const [fetchedAccounts, fetchedTransactions, fetchedShopProducts, fetchedShopOrders, fetchedShopFinances] = await Promise.all([
                 supabaseService.getAccounts(),
-                supabaseService.getTransactions()
+                supabaseService.getTransactions(),
+                supabaseService.getShopProducts(),
+                supabaseService.getShopOrders(),
+                supabaseService.getShopFinances()
             ]);
 
             setAccounts(fetchedAccounts);
             setTransactions(fetchedTransactions);
+            setProducts(fetchedShopProducts);
+            setOrders(fetchedShopOrders);
+            setShopFinances(fetchedShopFinances);
         } catch (error) {
             console.error("Failed to load data from Supabase:", error);
             // Don't show alert loop, just UI state
@@ -256,6 +298,72 @@ export default function App() {
     setDeletingTx(null);
   };
 
+  const handleEditTransaction = (tx: Transaction) => {
+    setEditingTx(tx);
+    setEditAmount(tx.amount.toString());
+    setEditDesc(tx.description);
+    setEditDate(new Date(tx.date));
+  };
+
+  const confirmEdit = async () => {
+    if (!editingTx) return;
+    
+    const newAmount = parseSmartAmount(editAmount);
+    if (newAmount <= 0 || !editDesc.trim()) {
+        alert("Vui lòng nhập đầy đủ thông tin hợp lệ!");
+        return;
+    }
+
+    const { id, amount: oldAmount, accountId, type, splitType } = editingTx;
+    const amountDiff = newAmount - oldAmount;
+    
+    const updates: { id: string, amount: number }[] = [];
+    const getAccountBalance = (accId: string) => accounts.find(a => a.id === accId)?.balance || 0;
+
+    // Update balance if amount changed and it's not a transfer (we disable editing amount for transfers to keep it simple)
+    if (amountDiff !== 0 && type !== TransactionType.TRANSFER) {
+        let newBalance = getAccountBalance(accountId);
+        
+        if (type === TransactionType.INCOME || type === TransactionType.SETTLEMENT) {
+            newBalance += amountDiff;
+        } else if (type === TransactionType.EXPENSE) {
+            if (splitType !== SplitType.MEO_PAID) {
+                newBalance -= amountDiff;
+            }
+        }
+        updates.push({ id: accountId, amount: newBalance });
+    } else if (amountDiff !== 0 && type === TransactionType.TRANSFER) {
+        alert("Không hỗ trợ sửa số tiền của giao dịch chuyển khoản. Vui lòng xoá và tạo lại.");
+        return;
+    }
+
+    const updatedTx: Transaction = {
+        ...editingTx,
+        amount: newAmount,
+        description: editDesc,
+        date: editDate.toISOString()
+    };
+
+    try {
+        for (const update of updates) {
+            await supabaseService.updateAccountBalance(update.id, update.amount);
+        }
+        await supabaseService.updateTransaction(updatedTx);
+
+        setTransactions(prev => prev.map(t => t.id === id ? updatedTx : t));
+        if (updates.length > 0) {
+            setAccounts(prev => prev.map(acc => {
+                const update = updates.find(u => u.id === acc.id);
+                return update ? { ...acc, balance: update.amount } : acc;
+            }));
+        }
+        setEditingTx(null);
+    } catch (error) {
+        console.error("Error updating transaction", error);
+        alert("Có lỗi khi cập nhật giao dịch!");
+    }
+  };
+
   // TÍNH NĂNG MỚI: Mèo nạp quỹ 300k
   const handleMeoDeposit = async () => {
     const AMOUNT = 300000;
@@ -305,7 +413,7 @@ export default function App() {
 
     const newTx: Transaction = {
         id: Date.now().toString(),
-        date: new Date().toISOString(),
+        date: qaDate.toISOString(),
         description: qaDesc,
         amount: amountVal,
         accountId: qaAccount,
@@ -349,6 +457,7 @@ export default function App() {
         setQaDesc('');
         setQaAmount('');
         setQaSplit(SplitType.SHARED);
+        setQaDate(new Date());
     } catch (error) {
         console.error("Error adding transaction", error);
         alert("Lỗi kết nối. Vui lòng thử lại.");
@@ -631,14 +740,32 @@ export default function App() {
                  </div>
                  
                  <div className="w-full h-[1px] bg-slate-100"></div>
+                 
+                 <div className="flex items-center gap-3">
+                     <span className="material-symbols-rounded text-slate-400">calendar_month</span>
+                     <DatePicker 
+                         selected={qaDate} 
+                         onChange={(date: Date | null) => date && setQaDate(date)} 
+                         dateFormat="dd/MM/yyyy"
+                         locale={vi}
+                         formatWeekDay={formatShortWeekday}
+                         className="w-full text-sm font-medium text-slate-700 outline-none bg-transparent cursor-pointer"
+                         wrapperClassName="flex-1"
+                     />
+                 </div>
 
-                 <input 
-                     type="text" 
-                     value={qaDesc}
-                     onChange={(e) => setQaDesc(e.target.value)}
-                     placeholder={qaType === TransactionType.INCOME ? "Nguồn thu nhập..." : "Nội dung chi tiêu..."}
-                     className="w-full text-lg font-medium text-slate-700 placeholder-slate-300 outline-none bg-transparent"
-                 />
+                 <div className="w-full h-[1px] bg-slate-100"></div>
+
+                 <div className="flex items-center gap-3">
+                     <span className="material-symbols-rounded text-slate-400">edit_note</span>
+                     <input 
+                         type="text" 
+                         value={qaDesc}
+                         onChange={(e) => setQaDesc(e.target.value)}
+                         placeholder={qaType === TransactionType.INCOME ? "Nguồn thu nhập..." : "Nội dung chi tiêu..."}
+                         className="w-full text-lg font-medium text-slate-700 placeholder-slate-300 outline-none bg-transparent"
+                     />
+                 </div>
              </div>
 
              <div className="mb-5">
@@ -940,17 +1067,28 @@ export default function App() {
                                                     </p>
                                                 </div>
                                                 
-                                                {/* Delete Button */}
+                                                {/* Edit & Delete Buttons */}
                                                 {!t.isSettled || t.type === TransactionType.SETTLEMENT || (t.type === TransactionType.INCOME && t.splitType === SplitType.MEO_PAID) ? (
-                                                    <button 
-                                                        onClick={(e) => {
-                                                            e.stopPropagation();
-                                                            handleDeleteTransaction(t.id);
-                                                        }}
-                                                        className="w-8 h-8 rounded-full flex items-center justify-center text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-all active:scale-90"
-                                                    >
-                                                        <span className="material-symbols-rounded text-lg">delete</span>
-                                                    </button>
+                                                    <div className="flex items-center gap-1">
+                                                        <button 
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleEditTransaction(t);
+                                                            }}
+                                                            className="w-8 h-8 rounded-full flex items-center justify-center text-slate-300 hover:text-blue-500 hover:bg-blue-50 transition-all active:scale-90"
+                                                        >
+                                                            <span className="material-symbols-rounded text-lg">edit</span>
+                                                        </button>
+                                                        <button 
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handleDeleteTransaction(t.id);
+                                                            }}
+                                                            className="w-8 h-8 rounded-full flex items-center justify-center text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-all active:scale-90"
+                                                        >
+                                                            <span className="material-symbols-rounded text-lg">delete</span>
+                                                        </button>
+                                                    </div>
                                                 ) : (
                                                     <div className="w-8 h-8 flex items-center justify-center text-slate-200">
                                                         <span className="material-symbols-rounded text-lg">lock</span>
@@ -966,6 +1104,521 @@ export default function App() {
                 </div>
             )}
         </div>
+      );
+  };
+
+  const renderShopInventory = () => {
+      const activeProducts = products.filter(p => p.shopId === activeShop);
+      
+      const handleAddProduct = async () => {
+          if (!invForm.name || !invForm.originalPrice || !invForm.sellingPrice) return alert('Vui lòng nhập đủ thông tin');
+          const newProd = {
+              id: Date.now().toString(),
+              shopId: activeShop,
+              name: invForm.name,
+              originalPrice: parseSmartAmount(invForm.originalPrice),
+              sellingPrice: parseSmartAmount(invForm.sellingPrice),
+              stock: parseInt(invForm.stock) || 0,
+              importDate: invForm.date.toISOString()
+          };
+          
+          try {
+              await supabaseService.addShopProduct(newProd);
+              setProducts([newProd, ...products]);
+              setInvForm({ name: '', originalPrice: '', sellingPrice: '', stock: '1', date: new Date() });
+          } catch (error) {
+              console.error("Error adding product:", error);
+              alert("Lỗi khi thêm sản phẩm");
+          }
+      };
+
+      return (
+          <div className="space-y-6 animate-fade-in">
+              <div className="bg-white p-5 rounded-[24px] shadow-sm border border-slate-100">
+                  <h3 className="font-bold text-slate-800 mb-4">Thêm sản phẩm mới</h3>
+                  <div className="space-y-3">
+                      <input type="text" placeholder="Tên sản phẩm" value={invForm.name} onChange={e => setInvForm({...invForm, name: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
+                      <div className="grid grid-cols-2 gap-3">
+                          <input type="text" placeholder="Giá gốc" value={invForm.originalPrice} onChange={e => setInvForm({...invForm, originalPrice: formatNumberInput(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
+                          <input type="text" placeholder="Giá bán (các kênh khác)" value={invForm.sellingPrice} onChange={e => setInvForm({...invForm, sellingPrice: formatNumberInput(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                          <input type="number" placeholder="Số lượng" value={invForm.stock} onChange={e => setInvForm({...invForm, stock: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
+                          <div className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus-within:border-indigo-500 flex items-center">
+                              <DatePicker selected={invForm.date} onChange={(date: Date | null) => date && setInvForm({...invForm, date})} dateFormat="dd/MM/yyyy" locale={vi} formatWeekDay={formatShortWeekday} className="w-full bg-transparent outline-none" wrapperClassName="flex-1" />
+                          </div>
+                      </div>
+                      <button onClick={handleAddProduct} className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-md shadow-indigo-200 active:scale-95 transition-all mt-2">Thêm vào kho</button>
+                  </div>
+              </div>
+
+              <div className="space-y-3">
+                  <h3 className="font-bold text-slate-800 px-1">Danh sách sản phẩm</h3>
+                  {activeProducts.length === 0 ? (
+                      <p className="text-center text-slate-400 py-4 text-sm">Kho hàng trống</p>
+                  ) : (
+                      activeProducts.map(p => (
+                          <div key={p.id} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-center">
+                              <div>
+                                  <h4 className="font-bold text-slate-800">{p.name}</h4>
+                                  <p className="text-xs text-slate-500 mt-1">Kho: <span className="font-bold text-indigo-600">{p.stock}</span> • Nhập: {new Date(p.importDate).toLocaleDateString('vi-VN')}</p>
+                              </div>
+                              <div className="text-right">
+                                  <p className="text-sm font-bold text-slate-800">{formatCurrency(p.sellingPrice)}</p>
+                                  <p className="text-[10px] text-orange-500 font-bold mt-0.5">Shopee: {formatCurrency(p.sellingPrice * 1.3)}</p>
+                              </div>
+                          </div>
+                      ))
+                  )}
+              </div>
+          </div>
+      );
+  };
+
+  const renderShopOrders = () => {
+      const activeProducts = products.filter(p => p.shopId === activeShop && p.stock > 0);
+      const activeOrders = orders.filter(o => o.shopId === activeShop).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      
+      const selectedProduct = activeProducts.find(p => p.id === ordForm.productId);
+      const isShopee = ordForm.channel === 'Shopee';
+      
+      let productPrice = selectedProduct ? selectedProduct.sellingPrice : 0;
+      if (isShopee) productPrice = productPrice * 1.3;
+      
+      const qty = parseInt(ordForm.qty) || 1;
+      const totalOrder = productPrice * qty;
+      const voucher = parseSmartAmount(ordForm.voucher) || 0;
+      const baseForFee = Math.max(0, totalOrder - voucher);
+      
+      const fixedFee = isShopee ? baseForFee * 0.14 : 0;
+      const serviceFee = isShopee ? 3000 : 0;
+      const vat = isShopee ? baseForFee * 0.01 : 0;
+      const pit = isShopee ? baseForFee * 0.005 : 0;
+      const paymentFee = isShopee ? (parseSmartAmount(ordForm.paymentFee) || 0) : 0;
+      const shipping = parseSmartAmount(ordForm.shipping) || 0;
+      const deposit = parseSmartAmount(ordForm.deposit) || 0;
+      
+      const netRevenue = totalOrder - fixedFee - serviceFee - vat - pit - paymentFee;
+
+      const handleCreateOrder = async () => {
+          if (!ordForm.name || !ordForm.productId) return alert('Vui lòng nhập tên KH và chọn sản phẩm');
+          
+          const newOrder = {
+              id: Date.now().toString(),
+              shopId: activeShop,
+              ...ordForm,
+              totalAmount: totalOrder,
+              netRevenue,
+              date: new Date().toISOString()
+          };
+          
+          try {
+              await supabaseService.addShopOrder(newOrder);
+              const product = products.find(p => p.id === ordForm.productId);
+              if (product) {
+                  await supabaseService.updateShopProductStock(product.id, product.stock - qty);
+              }
+              
+              setOrders([newOrder, ...orders]);
+              setProducts(products.map(p => p.id === ordForm.productId ? { ...p, stock: p.stock - qty } : p));
+              
+              alert('Tạo đơn hàng thành công!');
+              setOrdForm({ channel: 'Shopee', name: '', phone: '', address: '', productId: '', qty: '1', deposit: '', shipping: '', voucher: '', paymentFee: '', status: 'Chưa Gửi Hàng', paymentMethod: 'Đang Thanh Toán' });
+              setOrderTab('list');
+          } catch (error) {
+              console.error("Error creating order:", error);
+              alert("Lỗi khi tạo đơn hàng");
+          }
+      };
+
+      const handleUpdateOrder = async (orderId: string, field: string, value: string) => {
+          const order = orders.find(o => o.id === orderId);
+          if (!order) return;
+          
+          const updatedOrder = { ...order, [field]: value };
+          
+          try {
+              await supabaseService.updateShopOrder(orderId, { [field]: value });
+              
+              if (field === 'paymentMethod' && ['Ví ShopeePay', 'Tiền Mặt', 'TECHCOMBANK'].includes(value) && order.paymentMethod !== value) {
+                  const newFinance = {
+                      id: Date.now().toString(),
+                      shopId: activeShop,
+                      type: 'INCOME',
+                      amount: order.netRevenue,
+                      description: `Thanh toán đơn hàng ${order.channel} - ${order.name} (${value})`,
+                      category: order.channel === 'Shopee' ? 'Doanh thu sàn TMĐT' : 'Doanh thu trực tiếp',
+                      date: new Date().toISOString()
+                  };
+                  await supabaseService.addShopFinance(newFinance);
+                  setShopFinances([newFinance, ...shopFinances]);
+                  alert(`Đã tự động tạo phiếu thu ${formatCurrency(order.netRevenue)} vào Sổ quỹ!`);
+              }
+              
+              setOrders(orders.map(o => o.id === orderId ? updatedOrder : o));
+          } catch (error) {
+              console.error("Error updating order:", error);
+              alert("Lỗi khi cập nhật đơn hàng");
+          }
+      };
+
+      return (
+          <div className="space-y-6 animate-fade-in">
+              <div className="flex bg-slate-100 p-1 rounded-xl relative">
+                   <div className={`absolute top-1 bottom-1 w-[calc(50%-4px)] bg-white rounded-lg shadow-sm transition-all duration-300 ease-spring ${
+                       orderTab === 'create' ? 'left-[calc(50%+2px)]' : 'left-1'
+                   }`}></div>
+                   <button onClick={() => setOrderTab('list')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all relative z-10 ${orderTab === 'list' ? 'text-indigo-600' : 'text-slate-400'}`}>Theo dõi đơn</button>
+                   <button onClick={() => setOrderTab('create')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all relative z-10 ${orderTab === 'create' ? 'text-indigo-600' : 'text-slate-400'}`}>Tạo đơn mới</button>
+              </div>
+
+              {orderTab === 'create' ? (
+                  <div className="bg-white p-5 rounded-[24px] shadow-sm border border-slate-100">
+                      <h3 className="font-bold text-slate-800 mb-4">Tạo đơn hàng mới</h3>
+                      
+                      <div className="space-y-4">
+                          <div>
+                              <label className="text-xs font-bold text-slate-500 mb-1.5 block">Kênh bán hàng</label>
+                              <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                                  {['Shopee', 'Facebook', 'Instagram', 'Zalo'].map(c => (
+                                      <button key={c} onClick={() => setOrdForm({...ordForm, channel: c})} className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${ordForm.channel === c ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' : 'bg-slate-50 text-slate-600 border border-slate-200'}`}>
+                                          {c}
+                                      </button>
+                                  ))}
+                              </div>
+                          </div>
+
+                          <div className="space-y-3">
+                              <input type="text" placeholder="Tên khách hàng" value={ordForm.name} onChange={e => setOrdForm({...ordForm, name: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
+                              <div className="grid grid-cols-2 gap-3">
+                                  <input type="tel" placeholder="Số điện thoại" value={ordForm.phone} onChange={e => setOrdForm({...ordForm, phone: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
+                                  <input type="text" placeholder="Tiền cọc" value={ordForm.deposit} onChange={e => setOrdForm({...ordForm, deposit: formatNumberInput(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
+                              </div>
+                              <input type="text" placeholder="Địa chỉ giao hàng" value={ordForm.address} onChange={e => setOrdForm({...ordForm, address: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
+                          </div>
+
+                          <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                              <label className="text-xs font-bold text-slate-500 mb-2 block">Sản phẩm</label>
+                              <select value={ordForm.productId} onChange={e => setOrdForm({...ordForm, productId: e.target.value})} className="w-full bg-white border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500 mb-3 font-medium">
+                                  <option value="">-- Chọn sản phẩm --</option>
+                                  {activeProducts.map(p => (
+                                      <option key={p.id} value={p.id}>{p.name} (Kho: {p.stock})</option>
+                                  ))}
+                              </select>
+                              
+                              {selectedProduct && (
+                                  <div className="flex items-center justify-between bg-white p-3 rounded-lg border border-slate-100">
+                                      <span className="text-sm font-bold text-slate-700">Đơn giá: <span className="text-indigo-600">{formatCurrency(productPrice)}</span></span>
+                                      <div className="flex items-center gap-2">
+                                          <span className="text-xs font-bold text-slate-500">SL:</span>
+                                          <input type="number" min="1" max={selectedProduct.stock} value={ordForm.qty} onChange={e => setOrdForm({...ordForm, qty: e.target.value})} className="w-16 bg-slate-50 border border-slate-200 px-2 py-1 rounded-lg text-sm outline-none text-center font-bold" />
+                                      </div>
+                                  </div>
+                              )}
+                          </div>
+
+                          <div className="space-y-3">
+                              <input type="text" placeholder="Phí vận chuyển" value={ordForm.shipping} onChange={e => setOrdForm({...ordForm, shipping: formatNumberInput(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
+                              
+                              {isShopee && (
+                                  <div className="p-4 bg-orange-50 rounded-xl border border-orange-100 space-y-3">
+                                      <h4 className="text-xs font-bold text-orange-600 uppercase">Phí Shopee</h4>
+                                      <input type="text" placeholder="Trợ giá Voucher (trừ vào net)" value={ordForm.voucher} onChange={e => setOrdForm({...ordForm, voucher: formatNumberInput(e.target.value)})} className="w-full bg-white border border-orange-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-orange-500" />
+                                      <input type="text" placeholder="Phí thanh toán (tự nhập)" value={ordForm.paymentFee} onChange={e => setOrdForm({...ordForm, paymentFee: formatNumberInput(e.target.value)})} className="w-full bg-white border border-orange-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-orange-500" />
+                                      
+                                      <div className="text-xs text-orange-700 space-y-1 mt-2 bg-white p-3 rounded-lg border border-orange-100">
+                                          <div className="flex justify-between"><span>Tổng đơn (sau voucher):</span> <span className="font-bold">{formatCurrency(baseForFee)}</span></div>
+                                          <div className="flex justify-between"><span>Phí cố định (14%):</span> <span className="font-bold">-{formatCurrency(fixedFee)}</span></div>
+                                          <div className="flex justify-between"><span>Phí dịch vụ:</span> <span className="font-bold">-3.000 đ</span></div>
+                                          <div className="flex justify-between"><span>Thuế GTGT (1%):</span> <span className="font-bold">-{formatCurrency(vat)}</span></div>
+                                          <div className="flex justify-between"><span>Thuế TNCN (0.5%):</span> <span className="font-bold">-{formatCurrency(pit)}</span></div>
+                                      </div>
+                                  </div>
+                              )}
+                          </div>
+
+                          <div className="bg-slate-800 text-white p-4 rounded-xl mt-4">
+                              <div className="flex justify-between items-center mb-1">
+                                  <span className="text-sm text-slate-300">Tổng thu dự kiến (Net):</span>
+                                  <span className="text-xl font-bold text-emerald-400">{formatCurrency(netRevenue)}</span>
+                              </div>
+                          </div>
+
+                          <button onClick={handleCreateOrder} className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl shadow-md shadow-blue-200 active:scale-95 transition-all">Tạo đơn hàng</button>
+                      </div>
+                  </div>
+              ) : (
+                  <div className="space-y-4">
+                      {activeOrders.length === 0 ? (
+                          <p className="text-center text-slate-400 py-8 text-sm">Chưa có đơn hàng nào</p>
+                      ) : (
+                          activeOrders.map(o => (
+                              <div key={o.id} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+                                  <div className="flex justify-between items-start mb-3">
+                                      <div>
+                                          <div className="flex items-center gap-2 mb-1">
+                                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                                                  o.channel === 'Shopee' ? 'bg-orange-100 text-orange-600' :
+                                                  o.channel === 'Facebook' ? 'bg-blue-100 text-blue-600' :
+                                                  o.channel === 'Instagram' ? 'bg-pink-100 text-pink-600' : 'bg-blue-100 text-blue-500'
+                                              }`}>{o.channel}</span>
+                                              <span className="text-xs font-bold text-slate-800">{o.name}</span>
+                                          </div>
+                                          <p className="text-[10px] text-slate-500">{new Date(o.date).toLocaleDateString('vi-VN')} • {products.find(p => p.id === o.productId)?.name} (x{o.qty})</p>
+                                      </div>
+                                      <div className="text-right">
+                                          <p className="text-sm font-bold text-emerald-600">{formatCurrency(o.netRevenue)}</p>
+                                      </div>
+                                  </div>
+                                  
+                                  <div className="grid grid-cols-2 gap-2 mt-3 pt-3 border-t border-slate-50">
+                                      <div>
+                                          <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Trạng thái</label>
+                                          <select 
+                                              value={o.status} 
+                                              onChange={e => handleUpdateOrder(o.id, 'status', e.target.value)}
+                                              className={`w-full text-xs font-bold p-2 rounded-lg outline-none border ${
+                                                  o.status === 'Thành Công' ? 'bg-emerald-50 text-emerald-700 border-emerald-100' :
+                                                  o.status === 'Đang Giao' ? 'bg-blue-50 text-blue-700 border-blue-100' :
+                                                  o.status === 'Đã Đặt Cọc' ? 'bg-amber-50 text-amber-700 border-amber-100' :
+                                                  'bg-slate-50 text-slate-600 border-slate-200'
+                                              }`}
+                                          >
+                                              {['Chưa Gửi Hàng', 'Đã Đặt Cọc', 'Đang Giao', 'Thành Công'].map(s => (
+                                                  <option key={s} value={s}>{s}</option>
+                                              ))}
+                                          </select>
+                                      </div>
+                                      <div>
+                                          <label className="text-[10px] font-bold text-slate-400 uppercase mb-1 block">Thanh toán</label>
+                                          <select 
+                                              value={o.paymentMethod} 
+                                              onChange={e => handleUpdateOrder(o.id, 'paymentMethod', e.target.value)}
+                                              className={`w-full text-xs font-bold p-2 rounded-lg outline-none border ${
+                                                  o.paymentMethod !== 'Đang Thanh Toán' ? 'bg-indigo-50 text-indigo-700 border-indigo-100' : 'bg-slate-50 text-slate-600 border-slate-200'
+                                              }`}
+                                          >
+                                              {['Đang Thanh Toán', 'Ví ShopeePay', 'Tiền Mặt', 'TECHCOMBANK'].map(s => (
+                                                  <option key={s} value={s}>{s}</option>
+                                              ))}
+                                          </select>
+                                      </div>
+                                  </div>
+                              </div>
+                          ))
+                      )}
+                  </div>
+              )}
+          </div>
+      );
+  };
+
+  const renderShopFinance = () => {
+      const activeFinances = shopFinances.filter(f => f.shopId === activeShop).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      const totalIncome = activeFinances.filter(f => f.type === 'INCOME').reduce((sum, f) => sum + f.amount, 0);
+      const totalExpense = activeFinances.filter(f => f.type === 'EXPENSE').reduce((sum, f) => sum + f.amount, 0);
+      const balance = totalIncome - totalExpense;
+
+      const FINANCE_CATEGORIES = [
+          'Văn phòng phẩm', 'Vật tư đóng gói', 'In ấn - Sản xuất', 'Công nợ', 
+          'Tiền vận chuyển', 'Doanh thu sàn TMĐT', 'Doanh thu trực tiếp', 
+          'Khác', 'Đặt cọc', 'NHÀ ĐẦU TƯ', 'Quảng cáo'
+      ];
+
+      const handleAddFinance = async () => {
+          if (!finForm.amount || !finForm.desc) return alert('Vui lòng nhập đủ thông tin');
+          
+          const newFinance = {
+              id: Date.now().toString(),
+              shopId: activeShop,
+              type: finForm.type as 'INCOME' | 'EXPENSE',
+              amount: parseSmartAmount(finForm.amount),
+              description: finForm.desc,
+              category: finForm.category,
+              date: finForm.date.toISOString()
+          };
+          
+          try {
+              await supabaseService.addShopFinance(newFinance);
+              setShopFinances([newFinance, ...shopFinances]);
+              setFinForm({ type: 'INCOME', amount: '', desc: '', category: 'Khác', date: new Date() });
+          } catch (error) {
+              console.error("Error adding finance:", error);
+              alert("Lỗi khi thêm giao dịch");
+          }
+      };
+
+      return (
+          <div className="space-y-6 animate-fade-in">
+              <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-emerald-50 p-4 rounded-[20px] border border-emerald-100">
+                      <p className="text-xs font-bold text-emerald-600 uppercase mb-1">Tổng thu</p>
+                      <p className="text-lg font-bold text-emerald-700">{formatCurrency(totalIncome)}</p>
+                  </div>
+                  <div className="bg-rose-50 p-4 rounded-[20px] border border-rose-100">
+                      <p className="text-xs font-bold text-rose-600 uppercase mb-1">Tổng chi</p>
+                      <p className="text-lg font-bold text-rose-700">{formatCurrency(totalExpense)}</p>
+                  </div>
+                  <div className="col-span-2 bg-slate-800 p-5 rounded-[24px] text-white shadow-lg shadow-slate-200">
+                      <p className="text-sm font-medium text-slate-300 mb-1">Lợi nhuận ròng</p>
+                      <p className="text-3xl font-bold">{formatCurrency(balance)}</p>
+                  </div>
+              </div>
+
+              <div className="bg-white p-5 rounded-[24px] shadow-sm border border-slate-100">
+                  <h3 className="font-bold text-slate-800 mb-4">Thêm giao dịch</h3>
+                  <div className="flex bg-slate-100 p-1 rounded-xl mb-4 relative">
+                       <div className={`absolute top-1 bottom-1 w-[calc(50%-4px)] bg-white rounded-lg shadow-sm transition-all duration-300 ease-spring ${
+                           finForm.type === 'EXPENSE' ? 'left-[calc(50%+2px)]' : 'left-1'
+                       }`}></div>
+                       <button onClick={() => setFinForm({...finForm, type: 'INCOME'})} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all relative z-10 ${finForm.type === 'INCOME' ? 'text-emerald-600' : 'text-slate-400'}`}>Thu</button>
+                       <button onClick={() => setFinForm({...finForm, type: 'EXPENSE'})} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all relative z-10 ${finForm.type === 'EXPENSE' ? 'text-rose-600' : 'text-slate-400'}`}>Chi</button>
+                  </div>
+                  <div className="space-y-3">
+                      <input type="text" placeholder="Số tiền" value={finForm.amount} onChange={e => setFinForm({...finForm, amount: formatNumberInput(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500 font-bold" />
+                      <select value={finForm.category} onChange={e => setFinForm({...finForm, category: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500 font-medium">
+                          {FINANCE_CATEGORIES.map(cat => (
+                              <option key={cat} value={cat}>{cat}</option>
+                          ))}
+                      </select>
+                      <input type="text" placeholder="Nội dung" value={finForm.desc} onChange={e => setFinForm({...finForm, desc: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
+                      <div className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus-within:border-indigo-500 flex items-center">
+                          <DatePicker selected={finForm.date} onChange={(date: Date | null) => date && setFinForm({...finForm, date})} dateFormat="dd/MM/yyyy" locale={vi} formatWeekDay={formatShortWeekday} className="w-full bg-transparent outline-none" wrapperClassName="flex-1" />
+                      </div>
+                      <button onClick={handleAddFinance} className="w-full py-3 bg-slate-800 text-white font-bold rounded-xl shadow-md shadow-slate-200 active:scale-95 transition-all mt-2">Lưu giao dịch</button>
+                  </div>
+              </div>
+
+              <div className="space-y-3">
+                  <h3 className="font-bold text-slate-800 px-1">Lịch sử giao dịch</h3>
+                  {activeFinances.length === 0 ? (
+                      <p className="text-center text-slate-400 py-4 text-sm">Chưa có giao dịch</p>
+                  ) : (
+                      activeFinances.map(f => (
+                          <div key={f.id} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-center">
+                              <div className="flex items-center gap-3">
+                                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${f.type === 'INCOME' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                                      <span className="material-symbols-rounded">{f.type === 'INCOME' ? 'trending_up' : 'trending_down'}</span>
+                                  </div>
+                                  <div>
+                                      <h4 className="font-bold text-slate-800 text-sm">{f.description}</h4>
+                                      <div className="flex items-center gap-2 mt-0.5">
+                                          <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-bold">{f.category || 'Khác'}</span>
+                                          <p className="text-xs text-slate-500">{new Date(f.date).toLocaleDateString('vi-VN')}</p>
+                                      </div>
+                                  </div>
+                              </div>
+                              <p className={`font-bold text-sm ${f.type === 'INCOME' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                  {f.type === 'INCOME' ? '+' : '-'}{formatCurrency(f.amount)}
+                              </p>
+                          </div>
+                      ))
+                  )}
+              </div>
+          </div>
+      );
+  };
+
+  const renderShop = () => {
+      const shops = [
+          { id: 'eclat', name: 'Éclat Royal', icon: 'diamond' },
+          { id: 'elank', name: 'Elank Studio', icon: 'palette' }
+      ];
+
+      return (
+          <div className="pb-32 animate-fade-in pt-4">
+              {/* Header & Shop Selector */}
+              <div className="flex items-center justify-between mb-6 px-1">
+                  <h2 className="text-2xl font-bold text-slate-800">Cửa hàng</h2>
+                  <div className="relative">
+                      <select 
+                          value={activeShop}
+                          onChange={(e) => setActiveShop(e.target.value as 'eclat' | 'elank')}
+                          className="appearance-none bg-white border border-slate-200 text-slate-700 py-2 pl-4 pr-10 rounded-xl font-bold text-sm outline-none shadow-sm focus:border-indigo-500 cursor-pointer"
+                      >
+                          {shops.map(s => (
+                              <option key={s.id} value={s.id}>{s.name}</option>
+                          ))}
+                      </select>
+                      <span className="material-symbols-rounded absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none text-lg">
+                          expand_more
+                      </span>
+                  </div>
+              </div>
+
+              {/* Shop Dashboard */}
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                  <button 
+                      onClick={() => setShopView('orders')} 
+                      className={`bg-white p-5 rounded-[24px] shadow-sm border flex flex-col items-center justify-center gap-3 active:scale-95 transition-all ${
+                          shopView === 'orders' ? 'border-blue-500 ring-2 ring-blue-100' : 'border-slate-100'
+                      }`}
+                  >
+                      <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center">
+                          <span className="material-symbols-rounded">add_shopping_cart</span>
+                      </div>
+                      <span className="font-bold text-slate-700 text-sm">Tạo đơn hàng</span>
+                  </button>
+                  <button 
+                      onClick={() => setShopView('inventory')} 
+                      className={`bg-white p-5 rounded-[24px] shadow-sm border flex flex-col items-center justify-center gap-3 active:scale-95 transition-all ${
+                          shopView === 'inventory' ? 'border-amber-500 ring-2 ring-amber-100' : 'border-slate-100'
+                      }`}
+                  >
+                      <div className="w-12 h-12 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center">
+                          <span className="material-symbols-rounded">inventory_2</span>
+                      </div>
+                      <span className="font-bold text-slate-700 text-sm">Kho hàng</span>
+                  </button>
+                  <button 
+                      onClick={() => setShopView('finance')} 
+                      className={`bg-white p-5 rounded-[24px] shadow-sm border flex flex-col items-center justify-center gap-3 active:scale-95 transition-all col-span-2 ${
+                          shopView === 'finance' ? 'border-emerald-500 ring-2 ring-emerald-100' : 'border-slate-100'
+                      }`}
+                  >
+                      <div className="w-12 h-12 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center">
+                          <span className="material-symbols-rounded">account_balance_wallet</span>
+                      </div>
+                      <span className="font-bold text-slate-700 text-sm">Tài chính & Báo cáo</span>
+                  </button>
+              </div>
+
+              {/* Channels */}
+              <div className="mb-6">
+                  <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 px-1">Kênh bán hàng</h3>
+                  <div className="flex gap-3 overflow-x-auto no-scrollbar pb-2">
+                      {['Shopee', 'Facebook', 'Instagram', 'Zalo'].map(channel => (
+                          <div key={channel} className="bg-white px-4 py-2.5 rounded-xl border border-slate-100 shadow-sm flex items-center gap-2 whitespace-nowrap">
+                              <div className={`w-2 h-2 rounded-full ${
+                                  channel === 'Shopee' ? 'bg-orange-500' :
+                                  channel === 'Facebook' ? 'bg-blue-600' :
+                                  channel === 'Instagram' ? 'bg-pink-500' : 'bg-blue-400'
+                              }`}></div>
+                              <span className="text-sm font-bold text-slate-700">{channel}</span>
+                          </div>
+                      ))}
+                  </div>
+              </div>
+
+              {/* Placeholder for selected view */}
+              {shopView === 'inventory' && renderShopInventory()}
+              {shopView === 'orders' && renderShopOrders()}
+              {shopView === 'finance' && renderShopFinance()}
+              {shopView === 'overview' && (
+                  <div className="bg-slate-50 rounded-[24px] p-8 border border-slate-100 text-center flex flex-col items-center justify-center">
+                      <span className="material-symbols-rounded text-5xl text-slate-300 mb-4">
+                          storefront
+                      </span>
+                      <h4 className="text-lg font-bold text-slate-800 mb-2">Tổng quan</h4>
+                      <p className="text-slate-500 text-sm font-medium">
+                          Chọn một chức năng bên trên để bắt đầu quản lý <br/>
+                          <span className="font-bold text-indigo-600 mt-1 inline-block">
+                              {shops.find(s => s.id === activeShop)?.name}
+                          </span>
+                      </p>
+                  </div>
+              )}
+          </div>
       );
   };
 
@@ -998,9 +1651,42 @@ export default function App() {
             </div>
         )}
 
-        <div className="px-5 pt-safe">
-          {activeTab === 'home' && renderHome()}
-          {activeTab === 'history' && renderHistory()}
+        <div className="px-5 pt-safe relative">
+          <AnimatePresence mode="wait">
+              {activeTab === 'home' && (
+                  <motion.div
+                      key="home"
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -20 }}
+                      transition={{ duration: 0.2, ease: "easeInOut" }}
+                  >
+                      {renderHome()}
+                  </motion.div>
+              )}
+              {activeTab === 'history' && (
+                  <motion.div
+                      key="history"
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 20 }}
+                      transition={{ duration: 0.2, ease: "easeInOut" }}
+                  >
+                      {renderHistory()}
+                  </motion.div>
+              )}
+              {activeTab === 'shop' && (
+                  <motion.div
+                      key="shop"
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 20 }}
+                      transition={{ duration: 0.2, ease: "easeInOut" }}
+                  >
+                      {renderShop()}
+                  </motion.div>
+              )}
+          </AnimatePresence>
         </div>
 
         {/* Docked Bottom Nav */}
@@ -1020,6 +1706,14 @@ export default function App() {
                 >
                     <span className={`material-symbols-rounded text-[24px] ${activeTab === 'history' ? 'fill-1' : ''}`}>calendar_month</span>
                     <span className="text-[10px] font-bold">Lịch sử</span>
+                </button>
+
+                <button 
+                    onClick={() => setActiveTab('shop')}
+                    className={`flex flex-col items-center gap-0.5 p-1.5 rounded-xl transition-all active:scale-95 ${activeTab === 'shop' ? 'text-indigo-600 bg-indigo-50/50' : 'text-slate-400'}`}
+                >
+                    <span className={`material-symbols-rounded text-[24px] ${activeTab === 'shop' ? 'fill-1' : ''}`}>storefront</span>
+                    <span className="text-[10px] font-bold">Cửa hàng</span>
                 </button>
             </div>
         </div>
@@ -1148,6 +1842,77 @@ export default function App() {
                 </div>
             </div>
         )}
+        {/* Edit Transaction Modal */}
+        {editingTx && (
+            <div className="fixed inset-0 z-50 flex items-end justify-center">
+                <div className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" onClick={() => setEditingTx(null)}></div>
+                <div className="bg-white w-full max-w-md rounded-t-[32px] p-6 shadow-2xl animate-slide-up relative z-10 pb-[calc(env(safe-area-inset-bottom)+2rem)]">
+                    <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-8"></div>
+                    
+                    <h3 className="text-xl font-bold mb-6 flex items-center gap-2 text-slate-800">
+                        <span className="p-2 bg-blue-50 text-blue-600 rounded-full">
+                           <span className="material-symbols-rounded block">edit</span>
+                        </span>
+                        Sửa giao dịch
+                    </h3>
+                    
+                    <div className="space-y-5">
+                        <div>
+                            <label className="text-sm font-medium text-slate-600 mb-2 block">Số tiền</label>
+                            <input 
+                                type="text"
+                                inputMode="numeric"
+                                value={editAmount}
+                                onChange={(e) => setEditAmount(formatNumberInput(e.target.value))}
+                                className="w-full bg-slate-50 border-b-2 border-slate-200 px-4 py-3 text-2xl font-bold text-slate-800 outline-none focus:border-blue-500 transition-colors"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="text-sm font-medium text-slate-600 mb-2 block">Ngày giao dịch</label>
+                            <div className="w-full bg-slate-50 border-b-2 border-slate-200 px-4 py-3 text-lg font-bold text-slate-800 outline-none focus-within:border-blue-500 transition-colors flex items-center gap-2">
+                                <span className="material-symbols-rounded text-slate-400">calendar_month</span>
+                                <DatePicker 
+                                    selected={editDate} 
+                                    onChange={(date: Date | null) => date && setEditDate(date)} 
+                                    dateFormat="dd/MM/yyyy"
+                                    locale={vi}
+                                    formatWeekDay={formatShortWeekday}
+                                    className="w-full outline-none bg-transparent cursor-pointer"
+                                    wrapperClassName="flex-1"
+                                />
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="text-sm font-medium text-slate-600 mb-2 block">Nội dung</label>
+                            <input 
+                                type="text"
+                                value={editDesc}
+                                onChange={(e) => setEditDesc(e.target.value)}
+                                className="w-full bg-slate-50 border-b-2 border-slate-200 px-4 py-3 text-lg font-bold text-slate-800 outline-none focus:border-blue-500 transition-colors"
+                            />
+                        </div>
+
+                        <div className="flex gap-3 mt-8">
+                            <button 
+                                onClick={() => setEditingTx(null)}
+                                className="flex-1 py-4 bg-slate-100 text-slate-700 font-bold rounded-2xl hover:bg-slate-200 active:scale-95 transition-all"
+                            >
+                                Hủy
+                            </button>
+                            <button 
+                                onClick={confirmEdit}
+                                disabled={!editAmount || !editDesc.trim()}
+                                className="flex-1 py-4 bg-blue-600 text-white font-bold rounded-2xl shadow-lg shadow-blue-200 hover:bg-blue-700 disabled:opacity-50 disabled:shadow-none active:scale-95 transition-all"
+                            >
+                                Lưu thay đổi
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        )}
       </main>
 
       <style>{`
@@ -1167,6 +1932,45 @@ export default function App() {
         }
         .ease-spring {
             transition-timing-function: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+        
+        /* React DatePicker Custom Styles */
+        .react-datepicker-wrapper {
+            width: 100%;
+        }
+        .react-datepicker {
+            font-family: inherit;
+            border-radius: 1rem;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        .react-datepicker__header {
+            background-color: white;
+            border-bottom: 1px solid #e2e8f0;
+            border-top-left-radius: 1rem !important;
+            border-top-right-radius: 1rem !important;
+            padding-top: 1rem;
+        }
+        .react-datepicker__day-name, .react-datepicker__day, .react-datepicker__time-name {
+            width: 2.2rem;
+            line-height: 2.2rem;
+            margin: 0.15rem;
+            font-weight: 500;
+        }
+        .react-datepicker__day--selected {
+            background-color: #4f46e5 !important;
+            border-radius: 0.5rem;
+            color: white !important;
+        }
+        .react-datepicker__day--keyboard-selected {
+            background-color: #818cf8 !important;
+            border-radius: 0.5rem;
+            color: white !important;
+        }
+        .react-datepicker__current-month {
+            font-weight: 700;
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
         }
       `}</style>
     </div>

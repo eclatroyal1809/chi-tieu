@@ -109,6 +109,23 @@ export const addTransaction = async (tx: Transaction) => {
     if (error) throw error;
 };
 
+export const updateTransaction = async (tx: Transaction) => {
+    const { error } = await supabase.from('transactions')
+        .update({
+            date: tx.date,
+            description: tx.description,
+            amount: tx.amount,
+            account_id: tx.accountId,
+            to_account_id: tx.toAccountId,
+            split_type: tx.splitType,
+            type: tx.type,
+            is_settled: tx.isSettled,
+            settlement_id: tx.settlementId
+        })
+        .eq('id', tx.id);
+    if (error) throw error;
+};
+
 export const deleteTransaction = async (id: string) => {
     const { error } = await supabase.from('transactions').delete().eq('id', id);
     if (error) throw error;
@@ -129,3 +146,126 @@ export const updateTransactionsAsUnsettled = async (settlementId: string) => {
         .eq('settlement_id', settlementId);
     if (error) throw error;
 };
+
+// --- SHOP PRODUCTS ---
+export const getShopProducts = async (): Promise<any[]> => {
+    const { data, error } = await supabase.from('shop_products').select('*').order('import_date', { ascending: false });
+    if (error) throw error;
+    return data.map(p => ({
+        id: p.id,
+        shopId: p.shop_id,
+        name: p.name,
+        originalPrice: Number(p.original_price),
+        sellingPrice: Number(p.selling_price),
+        stock: Number(p.stock),
+        importDate: p.import_date
+    }));
+};
+
+export const addShopProduct = async (product: any) => {
+    const { error } = await supabase.from('shop_products').insert({
+        id: product.id,
+        shop_id: product.shopId,
+        name: product.name,
+        original_price: product.originalPrice,
+        selling_price: product.sellingPrice,
+        stock: product.stock,
+        import_date: product.importDate
+    });
+    if (error) throw error;
+};
+
+export const updateShopProductStock = async (productId: string, newStock: number) => {
+    const { error } = await supabase.from('shop_products')
+        .update({ stock: newStock })
+        .eq('id', productId);
+    if (error) throw error;
+};
+
+// --- SHOP ORDERS ---
+export const getShopOrders = async (): Promise<any[]> => {
+    const { data, error } = await supabase.from('shop_orders').select('*').order('date', { ascending: false });
+    if (error) throw error;
+    return data.map(o => ({
+        id: o.id,
+        shopId: o.shop_id,
+        channel: o.channel,
+        name: o.name,
+        phone: o.phone,
+        address: o.address,
+        productId: o.product_id,
+        qty: Number(o.qty),
+        deposit: Number(o.deposit),
+        shipping: Number(o.shipping),
+        voucher: Number(o.voucher),
+        paymentFee: Number(o.payment_fee),
+        status: o.status,
+        paymentMethod: o.payment_method,
+        totalAmount: Number(o.total_amount),
+        netRevenue: Number(o.net_revenue),
+        date: o.date
+    }));
+};
+
+export const addShopOrder = async (order: any) => {
+    const { error } = await supabase.from('shop_orders').insert({
+        id: order.id,
+        shop_id: order.shopId,
+        channel: order.channel,
+        name: order.name,
+        phone: order.phone,
+        address: order.address,
+        product_id: order.productId,
+        qty: order.qty,
+        deposit: order.deposit,
+        shipping: order.shipping,
+        voucher: order.voucher,
+        payment_fee: order.paymentFee,
+        status: order.status,
+        payment_method: order.paymentMethod,
+        total_amount: order.totalAmount,
+        net_revenue: order.netRevenue,
+        date: order.date
+    });
+    if (error) throw error;
+};
+
+export const updateShopOrder = async (orderId: string, updates: any) => {
+    const dbUpdates: any = {};
+    if (updates.status !== undefined) dbUpdates.status = updates.status;
+    if (updates.paymentMethod !== undefined) dbUpdates.payment_method = updates.paymentMethod;
+    
+    const { error } = await supabase.from('shop_orders')
+        .update(dbUpdates)
+        .eq('id', orderId);
+    if (error) throw error;
+};
+
+// --- SHOP FINANCES ---
+export const getShopFinances = async (): Promise<any[]> => {
+    const { data, error } = await supabase.from('shop_finances').select('*').order('date', { ascending: false });
+    if (error) throw error;
+    return data.map(f => ({
+        id: f.id,
+        shopId: f.shop_id,
+        type: f.type,
+        amount: Number(f.amount),
+        description: f.description,
+        category: f.category,
+        date: f.date
+    }));
+};
+
+export const addShopFinance = async (finance: any) => {
+    const { error } = await supabase.from('shop_finances').insert({
+        id: finance.id,
+        shop_id: finance.shopId,
+        type: finance.type,
+        amount: finance.amount,
+        description: finance.description,
+        category: finance.category,
+        date: finance.date
+    });
+    if (error) throw error;
+};
+

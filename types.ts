@@ -41,3 +41,43 @@ export interface Transaction {
   isSettled: boolean;
   settlementId?: string; // ID của Bill thanh toán (nếu đã trả)
 }
+
+export interface ShopProduct {
+  id: string;
+  shopId: string;
+  name: string;
+  originalPrice: number;
+  sellingPrice: number;
+  stock: number;
+  importDate: string;
+}
+
+export interface ShopOrder {
+  id: string;
+  shopId: string;
+  channel: string;
+  name: string;
+  phone: string;
+  address: string;
+  productId: string;
+  qty: number;
+  deposit: number;
+  shipping: number;
+  voucher: number;
+  paymentFee: number;
+  status: string;
+  paymentMethod: string;
+  totalAmount: number;
+  netRevenue: number;
+  date: string;
+}
+
+export interface ShopFinance {
+  id: string;
+  shopId: string;
+  type: 'INCOME' | 'EXPENSE';
+  amount: number;
+  description: string;
+  category: string;
+  date: string;
+}
