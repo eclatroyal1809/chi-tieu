@@ -1711,42 +1711,78 @@ export default function App() {
                                           </select>
                                       </div>
                                   {expandedOrders.includes(o.id) && (
-                                      <div className="mt-3 p-3 bg-slate-50 rounded-lg border border-slate-100 text-xs space-y-2">
-                                          {(() => {
-                                              let items: any[] = [];
-                                              try { const arr = JSON.parse(o.productId); if (Array.isArray(arr)) items = arr; } catch(e){}
-                                              if (items.length === 0) items = [{ productId: o.productId, qty: o.qty }];
-                                              const isShopeeLocal = o.channel === 'Shopee';
-                                              const rows = items.map((it, idx) => {
-                                                  const prod = products.find(p => p.id === it.productId);
-                                                  const name = prod?.name || 'Sản phẩm';
-                                                  const unit = prod ? prod.sellingPrice : 0;
-                                                  const price = isShopeeLocal ? unit * 1.3 : unit;
-                                                  const qty = parseInt(it.qty) || 1;
-                                                  const line = qty * price;
-                                                  return (
-                                                      <div key={idx} className="grid grid-cols-[1fr_48px_100px] gap-2 py-1">
-                                                          <div className="font-medium text-slate-700">{name}</div>
-                                                          <div className="text-right">x{qty}</div>
-                                                          <div className="text-right font-bold">{formatCurrency(line)}</div>
-                                                      </div>
-                                                  );
-                                              });
-                                              return <div>{rows}</div>;
-                                          })()}
-                                          <div className="pt-2 border-t border-slate-200 grid grid-cols-2 gap-2">
+                                      <div className="mt-4 pt-4 border-t border-slate-100">
+                                          <div className="bg-slate-50 rounded-xl p-4 space-y-4">
                                               <div>
-                                                  <div className="font-bold text-slate-700 mb-1">Khách hàng</div>
-                                                  <div className="text-[11px] text-slate-600">Tên: {o.name}</div>
-                                                  <div className="text-[11px] text-slate-600">SĐT: {o.phone || '-'}</div>
-                                                  <div className="text-[11px] text-slate-600">Địa chỉ: {o.address || '-'}</div>
-                                              </div>
-                                              <div className="text-right space-y-0.5">
-                                                  <div>Voucher: <span className="font-bold">-{formatCurrency(o.voucher || 0)}</span></div>
-                                                  <div>Vận chuyển: <span className="font-bold">{formatCurrency(o.shipping || 0)}</span></div>
-                                                  <div>Phí thanh toán: <span className="font-bold">-{formatCurrency(o.paymentFee || 0)}</span></div>
-                                                  <div>Đặt cọc: <span className="font-bold">-{formatCurrency(o.deposit || 0)}</span></div>
-                                                  <div className="border-t border-slate-200 pt-1 font-bold">Khách trả (Net): <span className="text-emerald-600">{formatCurrency(o.netRevenue)}</span></div>
+                                                  <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Sản phẩm</h4>
+                                                  <div className="space-y-2">
+                                                      {(() => {
+                                                          let items: any[] = [];
+                                                          try { const arr = JSON.parse(o.productId); if (Array.isArray(arr)) items = arr; } catch(e){}
+                                                          if (items.length === 0) items = [{ productId: o.productId, qty: o.qty }];
+                                                          const isShopeeLocal = o.channel === 'Shopee';
+                                                          let subtotal = 0;
+                                                          const productRows = items.map((it, idx) => {
+                                                              const prod = products.find(p => p.id === it.productId);
+                                                              const name = prod?.name || 'Sản phẩm';
+                                                              const unit = prod ? prod.sellingPrice : 0;
+                                                              const price = isShopeeLocal ? unit * 1.3 : unit;
+                                                              const qty = parseInt(it.qty) || 1;
+                                                              const line = qty * price;
+                                                              subtotal += line;
+                                                              return (
+                                                                  <div key={idx} className="flex justify-between items-center bg-white p-3 rounded-lg border border-slate-100 shadow-sm">
+                                                                      <div className="flex-1">
+                                                                          <div className="font-medium text-sm text-slate-800">{name}</div>
+                                                                          <div className="text-xs text-slate-500 mt-0.5">{formatCurrency(price)} x {qty}</div>
+                                                                      </div>
+                                                                      <div className="font-bold text-sm text-slate-800">{formatCurrency(line)}</div>
+                                                                  </div>
+                                                              );
+                                                          });
+                                                          
+                                                          const totalToPay = subtotal - (o.voucher || 0) + (o.shipping || 0);
+                                                          const remainingToPay = totalToPay - (o.deposit || 0);
+
+                                                          return (
+                                                              <>
+                                                                  {productRows}
+                                                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                                                                      <div className="bg-white p-3 rounded-lg border border-slate-100 shadow-sm">
+                                                                          <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Khách hàng</h4>
+                                                                          <div className="space-y-1.5 text-sm">
+                                                                              <div className="flex justify-between"><span className="text-slate-500">Tên:</span> <span className="font-medium text-slate-800">{o.name}</span></div>
+                                                                              <div className="flex justify-between"><span className="text-slate-500">SĐT:</span> <span className="font-medium text-slate-800">{o.phone || '-'}</span></div>
+                                                                              <div className="flex justify-between"><span className="text-slate-500">Địa chỉ:</span> <span className="font-medium text-slate-800 text-right max-w-[150px] truncate" title={o.address || '-'}>{o.address || '-'}</span></div>
+                                                                          </div>
+                                                                      </div>
+                                                                      <div className="bg-white p-3 rounded-lg border border-slate-100 shadow-sm">
+                                                                          <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Thanh toán</h4>
+                                                                          <div className="space-y-1.5 text-sm">
+                                                                              <div className="flex justify-between"><span className="text-slate-500">Tạm tính:</span> <span className="font-medium text-slate-800">{formatCurrency(subtotal)}</span></div>
+                                                                              <div className="flex justify-between"><span className="text-slate-500">Voucher:</span> <span className="font-medium text-rose-600">-{formatCurrency(o.voucher || 0)}</span></div>
+                                                                              <div className="flex justify-between"><span className="text-slate-500">Vận chuyển:</span> <span className="font-medium text-slate-800">{formatCurrency(o.shipping || 0)}</span></div>
+                                                                              <div className="pt-2 mt-2 border-t border-slate-100 flex justify-between items-center">
+                                                                                  <span className="font-bold text-slate-800">Khách cần trả:</span>
+                                                                                  <span className="font-bold text-indigo-600">{formatCurrency(totalToPay)}</span>
+                                                                              </div>
+                                                                              {(o.deposit || 0) > 0 && (
+                                                                                  <>
+                                                                                      <div className="flex justify-between"><span className="text-slate-500">Đã đặt cọc:</span> <span className="font-medium text-rose-600">-{formatCurrency(o.deposit || 0)}</span></div>
+                                                                                      <div className="flex justify-between"><span className="text-slate-500">Còn lại:</span> <span className="font-medium text-rose-600">{formatCurrency(remainingToPay)}</span></div>
+                                                                                  </>
+                                                                              )}
+                                                                              <div className="pt-2 mt-2 border-t border-slate-100 flex justify-between items-center">
+                                                                                  <span className="font-bold text-slate-800">Thực thu (Net):</span>
+                                                                                  <span className="font-bold text-lg text-emerald-600">{formatCurrency(o.netRevenue)}</span>
+                                                                              </div>
+                                                                          </div>
+                                                                      </div>
+                                                                  </div>
+                                                              </>
+                                                          );
+                                                      })()}
+                                                  </div>
                                               </div>
                                           </div>
                                       </div>
@@ -1804,92 +1840,178 @@ export default function App() {
                                               container.style.position = 'fixed';
                                               container.style.left = '-9999px';
                                               container.style.top = '0';
-                                              container.style.width = '720px';
+                                              container.style.width = '800px';
                                               container.style.background = '#fff';
-                                              container.style.padding = '24px';
-                                              container.style.fontFamily = 'ui-sans-serif, system-ui';
-                                              const header = document.createElement('div');
-                                              header.style.display = 'flex';
-                                              header.style.justifyContent = 'space-between';
-                                              header.style.alignItems = 'center';
-                                              const seller = document.createElement('div');
-                                              const sTitle = document.createElement('div'); sTitle.textContent = 'ELANK STUDIO'; sTitle.style.fontSize = '18px'; sTitle.style.fontWeight = '800';
-                                              const sAddr = document.createElement('div'); sAddr.textContent = 'Địa chỉ: .................'; sAddr.style.fontSize = '12px'; sAddr.style.color = '#334155';
-                                              const sPhone = document.createElement('div'); sPhone.textContent = 'Điện thoại: .............'; sPhone.style.fontSize = '12px'; sPhone.style.color = '#334155';
-                                              seller.appendChild(sTitle); seller.appendChild(sAddr); seller.appendChild(sPhone);
-                                              const doc = document.createElement('div');
-                                              const dTitle = document.createElement('div'); dTitle.textContent = 'HOÁ ĐƠN BÁN LẺ'; dTitle.style.fontSize = '20px'; dTitle.style.fontWeight = '800';
-                                              const dInfo = document.createElement('div'); dInfo.textContent = `Số: ${o.id} • Ngày: ${new Date(o.date).toLocaleDateString('vi-VN')}`; dInfo.style.fontSize = '12px'; dInfo.style.color = '#64748b';
-                                              doc.appendChild(dTitle); doc.appendChild(dInfo);
-                                              header.appendChild(seller); header.appendChild(doc);
-                                              const buyer = document.createElement('div');
-                                              buyer.style.marginTop = '12px';
-                                              buyer.style.fontSize = '12px';
-                                              buyer.style.color = '#0f172a';
-                                              buyer.innerHTML = `<div>Khách hàng: <strong>${o.name}</strong></div>
-                                              <div>SĐT: ${o.phone || '-'}</div>
-                                              <div>Địa chỉ: ${o.address || '-'}</div>`;
-                                              const table = document.createElement('table');
-                                              table.style.width = '100%';
-                                              table.style.marginTop = '12px';
-                                              table.style.borderCollapse = 'collapse';
-                                              const thead = document.createElement('thead');
-                                              thead.innerHTML = '<tr><th style="border:1px solid #e2e8f0;padding:6px;text-align:left;font-size:12px">STT</th><th style="border:1px solid #e2e8f0;padding:6px;text-align:left;font-size:12px">Sản phẩm</th><th style="border:1px solid #e2e8f0;padding:6px;text-align:right;font-size:12px">SL</th><th style="border:1px solid #e2e8f0;padding:6px;text-align:right;font-size:12px">Đơn giá</th><th style="border:1px solid #e2e8f0;padding:6px;text-align:right;font-size:12px">Thành tiền</th></tr>';
-                                              const tbody = document.createElement('tbody');
+                                              container.style.padding = '40px';
+                                              container.style.fontFamily = '"Times New Roman", Times, serif';
+                                              container.style.color = '#000';
+
+                                              const readNumber = (num: number) => {
+                                                  if (num === 0) return 'Không đồng';
+                                                  const units = ['', 'một', 'hai', 'ba', 'bốn', 'năm', 'sáu', 'bảy', 'tám', 'chín'];
+                                                  const placeValues = ['', 'nghìn', 'triệu', 'tỷ'];
+                                                  let str = Math.abs(num).toString();
+                                                  let result = '';
+                                                  let groups = [];
+                                                  while (str.length > 0) {
+                                                      groups.push(str.slice(-3));
+                                                      str = str.slice(0, -3);
+                                                  }
+                                                  for (let i = 0; i < groups.length; i++) {
+                                                      if (parseInt(groups[i]) === 0) continue;
+                                                      let groupStr = '';
+                                                      let g = groups[i].padStart(3, '0');
+                                                      let h = parseInt(g[0]), t = parseInt(g[1]), u = parseInt(g[2]);
+                                                      if (h > 0 || i < groups.length - 1) groupStr += units[h] + ' trăm ';
+                                                      if (t === 0 && u > 0 && (h > 0 || i < groups.length - 1)) groupStr += 'lẻ ';
+                                                      else if (t === 1) groupStr += 'mười ';
+                                                      else if (t > 1) groupStr += units[t] + ' mươi ';
+                                                      if (u === 1 && t > 1) groupStr += 'mốt ';
+                                                      else if (u === 5 && t > 0) groupStr += 'lăm ';
+                                                      else if (u > 0) groupStr += units[u] + ' ';
+                                                      result = groupStr + placeValues[i] + ' ' + result;
+                                                  }
+                                                  result = result.trim().replace(/\s+/g, ' ');
+                                                  return result.charAt(0).toUpperCase() + result.slice(1) + ' đồng chẵn';
+                                              };
+
+                                              const d = new Date(o.date);
+                                              const dateStr = `Ngày ${d.getDate().toString().padStart(2, '0')} tháng ${(d.getMonth() + 1).toString().padStart(2, '0')} năm ${d.getFullYear()}`;
+
                                               let items:any[] = [];
                                               try { const arr = JSON.parse(o.productId); if (Array.isArray(arr)) items = arr; } catch(e){}
                                               if (items.length === 0) items = [{ productId: o.productId, qty: o.qty }];
+                                              
                                               let subtotal = 0;
-                                              items.forEach((it, idx) => {
+                                              const rowsHtml = items.map((it, idx) => {
                                                   const prod = products.find(p => p.id === it.productId);
                                                   const unit = prod ? prod.sellingPrice : 0;
                                                   const price = o.channel === 'Shopee' ? unit * 1.3 : unit;
                                                   const q = parseInt(it.qty) || 1;
                                                   const line = price * q;
                                                   subtotal += line;
-                                                  const tr = document.createElement('tr');
-                                                  tr.innerHTML = `<td style="border:1px solid #e2e8f0;padding:6px;font-size:12px">${idx+1}</td>
-                                                  <td style="border:1px solid #e2e8f0;padding:6px;font-size:12px">${prod?.name || 'Sản phẩm'}</td>
-                                                  <td style="border:1px solid #e2e8f0;padding:6px;text-align:right;font-size:12px">${q}</td>
-                                                  <td style="border:1px solid #e2e8f0;padding:6px;text-align:right;font-size:12px">${new Intl.NumberFormat('vi-VN').format(price)}</td>
-                                                  <td style="border:1px solid #e2e8f0;padding:6px;text-align:right;font-size:12px">${new Intl.NumberFormat('vi-VN').format(line)}</td>`;
-                                                  tbody.appendChild(tr);
-                                              });
-                                              table.appendChild(thead); table.appendChild(tbody);
-                                              const sum = document.createElement('div');
-                                              sum.style.marginTop = '12px';
-                                              sum.style.fontSize = '12px';
+                                                  return `
+                                                  <tr>
+                                                      <td style="border: 1px solid #000; padding: 8px; text-align: center;">${idx + 1}</td>
+                                                      <td style="border: 1px solid #000; padding: 8px;">${prod?.name || 'Sản phẩm'}</td>
+                                                      <td style="border: 1px solid #000; padding: 8px; text-align: center;">Bộ</td>
+                                                      <td style="border: 1px solid #000; padding: 8px; text-align: center;">${q}</td>
+                                                      <td style="border: 1px solid #000; padding: 8px; text-align: right;">${new Intl.NumberFormat('vi-VN').format(price)}</td>
+                                                      <td style="border: 1px solid #000; padding: 8px; text-align: right;">${new Intl.NumberFormat('vi-VN').format(line)}</td>
+                                                  </tr>
+                                                  `;
+                                              }).join('');
+
                                               const voucher = o.voucher || 0;
-                                              const baseForFee = Math.max(0, subtotal - voucher);
-                                              const fixedFee = o.channel === 'Shopee' ? baseForFee * 0.14 : 0;
-                                              const serviceFee = o.channel === 'Shopee' ? 3000 : 0;
-                                              const vat = o.channel === 'Shopee' ? baseForFee * 0.01 : 0;
-                                              const pit = o.channel === 'Shopee' ? baseForFee * 0.005 : 0;
-                                              const paymentFee = o.channel === 'Shopee' ? (o.paymentFee || 0) : 0;
                                               const shipping = o.shipping || 0;
-                                              const net = o.netRevenue;
-                                              sum.innerHTML = `<div style="display:flex;justify-content:flex-end">
-                                                  <div style="width:420px">
-                                                    <div style="display:flex;justify-content:space-between"><span>Tạm tính</span><strong>${new Intl.NumberFormat('vi-VN').format(subtotal)}</strong></div>
-                                                    <div style="display:flex;justify-content:space-between"><span>Voucher</span><strong>-${new Intl.NumberFormat('vi-VN').format(voucher)}</strong></div>
-                                                    ${o.channel === 'Shopee' ? `
-                                                    <div style="display:flex;justify-content:space-between"><span>Phí cố định (14%)</span><strong>-${new Intl.NumberFormat('vi-VN').format(fixedFee)}</strong></div>
-                                                    <div style="display:flex;justify-content:space-between"><span>Phí dịch vụ</span><strong>-${new Intl.NumberFormat('vi-VN').format(serviceFee)}</strong></div>
-                                                    <div style="display:flex;justify-content:space-between"><span>Thuế GTGT (1%)</span><strong>-${new Intl.NumberFormat('vi-VN').format(vat)}</strong></div>
-                                                    <div style="display:flex;justify-content:space-between"><span>Thuế TNCN (0.5%)</span><strong>-${new Intl.NumberFormat('vi-VN').format(pit)}</strong></div>
-                                                    <div style="display:flex;justify-content:space-between"><span>Phí thanh toán</span><strong>-${new Intl.NumberFormat('vi-VN').format(paymentFee)}</strong></div>
-                                                    ` : ``}
-                                                    <div style="display:flex;justify-content:space-between"><span>Vận chuyển</span><strong>${new Intl.NumberFormat('vi-VN').format(shipping)}</strong></div>
-                                                    <div style="border-top:1px solid #e2e8f0;margin-top:6px;padding-top:6px;display:flex;justify-content:space-between"><span>Khách trả (Net)</span><strong>${new Intl.NumberFormat('vi-VN').format(net)}</strong></div>
+                                              const deposit = o.deposit || 0;
+                                              const totalToPay = subtotal - voucher + shipping - deposit;
+
+                                              container.innerHTML = `
+                                                  <div style="text-align: center; margin-bottom: 20px;">
+                                                      <h1 style="margin: 0; font-size: 24px; text-transform: uppercase;">HÓA ĐƠN BÁN HÀNG</h1>
+                                                      <p style="margin: 5px 0 0 0; font-size: 14px;">${dateStr}</p>
                                                   </div>
-                                                </div>`;
-                                              container.appendChild(header);
-                                              container.appendChild(buyer);
-                                              container.appendChild(table);
-                                              container.appendChild(sum);
+                                                  
+                                                  <div style="display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 14px; line-height: 1.5;">
+                                                      <div>
+                                                          <div>Tên người bán: <strong>ELANK STUDIO</strong></div>
+                                                          <div style="white-space: nowrap;">Địa chỉ: 101 Đ. Tôn Dật Tiên, phường Tân Mỹ, Quận 7, Hồ Chí Minh</div>
+                                                          <div>Điện thoại: 0899.660.847</div>
+                                                          <div style="display: flex; gap: 10px;">
+                                                              <div style="white-space: nowrap;">Số tài khoản:</div>
+                                                              <div style="white-space: nowrap;"><strong>900410028888</strong> &nbsp;&nbsp;TECHCOMBANK NGUYEN DO TUONG VY</div>
+                                                          </div>
+                                                      </div>
+                                                      <div>
+                                                          <img src="https://img.vietqr.io/image/TCB-900410028888-compact2.png?amount=${totalToPay}&addInfo=Thanh toan don hang ${o.id}&accountName=NGUYEN DO TUONG VY" alt="QR Code" style="width: 90px; height: 90px; object-fit: contain;" crossorigin="anonymous" />
+                                                      </div>
+                                                  </div>
+                                                  
+                                                  <div style="margin-bottom: 20px; font-size: 14px; line-height: 1.5;">
+                                                      <div>Tên người mua: <strong>${o.name}</strong></div>
+                                                      <div style="white-space: nowrap;">Địa chỉ: ${o.address || ''}</div>
+                                                      <div>Điện thoại: ${o.phone || ''}</div>
+                                                  </div>
+                                                  
+                                                  <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 0; border: 1px solid #000;">
+                                                      <thead>
+                                                          <tr>
+                                                              <th style="border: 1px solid #000; padding: 8px; text-align: center; white-space: nowrap;">STT</th>
+                                                              <th style="border: 1px solid #000; padding: 8px; text-align: center;">Tên hàng hóa, dịch vụ</th>
+                                                              <th style="border: 1px solid #000; padding: 8px; text-align: center; white-space: nowrap;">Đơn vị<br/>tính</th>
+                                                              <th style="border: 1px solid #000; padding: 8px; text-align: center; white-space: nowrap;">Số lượng</th>
+                                                              <th style="border: 1px solid #000; padding: 8px; text-align: center; white-space: nowrap;">Đơn giá</th>
+                                                              <th style="border: 1px solid #000; padding: 8px; text-align: center; white-space: nowrap;">Thành tiền</th>
+                                                          </tr>
+                                                          <tr>
+                                                              <th style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: normal;">1</th>
+                                                              <th style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: normal;">2</th>
+                                                              <th style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: normal;">3</th>
+                                                              <th style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: normal;">4</th>
+                                                              <th style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: normal;">5</th>
+                                                              <th style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: normal;">6 = 4x5</th>
+                                                          </tr>
+                                                      </thead>
+                                                      <tbody>
+                                                          ${rowsHtml}
+                                                          <tr>
+                                                              <td colspan="5" style="border: 1px solid #000; padding: 8px; text-align: center; font-weight: bold;">TỔNG CỘNG:</td>
+                                                              <td style="border: 1px solid #000; padding: 8px; text-align: right; font-weight: bold; white-space: nowrap;">${new Intl.NumberFormat('vi-VN').format(subtotal)}</td>
+                                                          </tr>
+                                                      </tbody>
+                                                  </table>
+                                                  
+                                                  <div style="display: flex; justify-content: flex-end; font-size: 14px; line-height: 1.5; margin-bottom: 30px; border: 1px solid #000; border-top: none;">
+                                                      <table style="width: 500px; border-collapse: collapse;">
+                                                          <tr>
+                                                              <td style="text-align: right; padding: 4px 8px; white-space: nowrap;">Phí vận chuyển:</td>
+                                                              <td style="text-align: right; padding: 4px 8px; width: 120px; white-space: nowrap;">${new Intl.NumberFormat('vi-VN').format(shipping)}</td>
+                                                          </tr>
+                                                          <tr>
+                                                              <td style="text-align: right; padding: 4px 8px; white-space: nowrap;">Đã thanh toán:</td>
+                                                              <td style="text-align: right; padding: 4px 8px; white-space: nowrap;">${new Intl.NumberFormat('vi-VN').format(deposit)}</td>
+                                                          </tr>
+                                                          <tr>
+                                                              <td style="text-align: right; padding: 4px 8px; white-space: nowrap;">Chiết khấu:</td>
+                                                              <td style="text-align: right; padding: 4px 8px; white-space: nowrap;">${new Intl.NumberFormat('vi-VN').format(voucher)}</td>
+                                                          </tr>
+                                                          <tr>
+                                                              <td style="text-align: right; padding: 4px 8px; font-weight: bold; white-space: nowrap;">TỔNG THANH TOÁN:</td>
+                                                              <td style="text-align: right; padding: 4px 8px; font-weight: bold; font-size: 16px; white-space: nowrap;">${new Intl.NumberFormat('vi-VN').format(totalToPay)}</td>
+                                                          </tr>
+                                                          <tr>
+                                                              <td style="text-align: right; padding: 4px 8px; white-space: nowrap;">Số tiền viết bằng chữ:</td>
+                                                              <td style="text-align: right; padding: 4px 8px; font-style: italic; white-space: nowrap;">${readNumber(totalToPay)}</td>
+                                                          </tr>
+                                                      </table>
+                                                  </div>
+                                                  
+                                                  <div style="display: flex; justify-content: space-between; text-align: center; font-size: 14px; margin-bottom: 20px;">
+                                                      <div style="width: 50%;">
+                                                          <div style="font-weight: bold; margin-bottom: 5px;">NGƯỜI MUA HÀNG</div>
+                                                          <div style="font-style: italic;">(Ký, ghi rõ họ, tên)</div>
+                                                      </div>
+                                                      <div style="width: 50%;">
+                                                          <div style="font-style: italic; margin-bottom: 5px;">${dateStr}</div>
+                                                          <div style="font-weight: bold;">NGƯỜI BÁN HÀNG</div>
+                                                          <div style="margin-top: 40px; font-family: 'Brush Script MT', cursive, sans-serif; font-size: 32px;">Vy</div>
+                                                          <div style="margin-top: 10px; font-weight: bold;">Nguyễn Đỗ Tường Vy</div>
+                                                      </div>
+                                                  </div>
+                                                  
+                                                  <div style="font-size: 12px; line-height: 1.5;">
+                                                      <div>(In tại Công ty in........., Mã số thuế................)</div>
+                                                      <div style="font-weight: bold;">Ghi chú:</div>
+                                                      <div>- Liên 1: Lưu</div>
+                                                      <div>- Liên 2: Giao người mua</div>
+                                                      <div>- Liên 3: Nội bộ</div>
+                                                  </div>
+                                              `;
+
                                               document.body.appendChild(container);
                                               try {
-                                                  const canvas = await html2canvas(container, { scale: 2, backgroundColor: '#ffffff' });
+                                                  const canvas = await html2canvas(container, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
                                                   const link = document.createElement('a');
                                                   link.download = `Hoa-don-${o.name}-${new Date(o.date).toLocaleDateString('vi-VN').replace(/\//g,'-')}.png`;
                                                   link.href = canvas.toDataURL('image/png');
