@@ -1443,23 +1443,89 @@ export default function App() {
                               <input type="text" placeholder="Địa chỉ giao hàng" value={ordForm.address} onChange={e => setOrdForm({...ordForm, address: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
                           </div>
 
-                          <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
-                              <div className="flex items-center justify-between mb-2">
-                                  <label className="text-xs font-bold text-slate-500 uppercase">Sản phẩm</label>
-                                  <button onClick={() => setOrdItems([...ordItems, { productId: '', qty: '1' }])} className="text-xs font-bold px-2 py-1 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-200 active:scale-95 transition-all">Thêm dòng</button>
-                              </div>
-                              {ordItems.map((it, idx) => (
-                                  <div key={idx} className="grid grid-cols-[1fr_auto_auto] gap-2 items-center bg-white p-2 rounded-lg border border-slate-200 mb-2">
-                                      <select value={it.productId} onChange={e => setOrdItems(ordItems.map((x,i)=> i===idx ? {...x, productId: e.target.value} : x))} className="bg-white border border-slate-200 px-2 py-2 rounded-lg text-sm outline-none">
-                                          <option value="">Chọn sản phẩm</option>
-                                          {activeProducts.map(p => (
-                                              <option key={p.id} value={p.id}>{p.name} (Kho: {p.stock})</option>
-                                          ))}
-                                      </select>
-                                      <input type="number" min="1" value={it.qty} onChange={e => setOrdItems(ordItems.map((x,i)=> i===idx ? {...x, qty: e.target.value} : x))} className="w-20 bg-slate-50 border border-slate-200 px-2 py-2 rounded-lg text-sm outline-none text-center font-bold" />
-                                      <button onClick={() => setOrdItems(ordItems.filter((_,i)=>i!==idx))} className="px-2 py-2 rounded-lg bg-rose-50 text-rose-600 border border-rose-200 active:scale-95">Xoá</button>
+                          <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm">
+                              <div className="flex items-center justify-between mb-4">
+                                  <div className="flex items-center gap-2">
+                                      <div className="w-8 h-8 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600">
+                                          <span className="material-symbols-rounded text-sm">inventory_2</span>
+                                      </div>
+                                      <h3 className="font-bold text-slate-800">Sản phẩm đơn hàng</h3>
                                   </div>
-                              ))}
+                                  <button onClick={() => setOrdItems([...ordItems, { productId: '', qty: '1' }])} className="text-xs font-bold px-3 py-1.5 rounded-lg bg-indigo-600 text-white shadow-sm shadow-indigo-200 active:scale-95 transition-all flex items-center gap-1">
+                                      <span className="material-symbols-rounded text-sm">add</span>
+                                      Thêm SP
+                                  </button>
+                              </div>
+                              
+                              <div className="space-y-3">
+                                  {ordItems.map((it, idx) => {
+                                      const selectedProd = products.find(p => p.id === it.productId);
+                                      const price = selectedProd ? (isShopee ? selectedProd.sellingPrice * 1.3 : selectedProd.sellingPrice) : 0;
+                                      const qty = parseInt(it.qty) || 0;
+                                      const lineTotal = price * qty;
+                                      
+                                      return (
+                                          <div key={idx} className="p-3 rounded-xl border border-slate-100 bg-slate-50 relative group transition-all hover:border-indigo-200 hover:shadow-sm">
+                                              {ordItems.length > 1 && (
+                                                  <button 
+                                                      onClick={() => setOrdItems(ordItems.filter((_,i)=>i!==idx))} 
+                                                      className="absolute -top-2 -right-2 w-6 h-6 bg-white border border-rose-200 text-rose-500 rounded-full flex items-center justify-center shadow-sm hover:bg-rose-50 hover:text-rose-600 transition-colors z-10"
+                                                      title="Xoá sản phẩm này"
+                                                  >
+                                                      <span className="material-symbols-rounded text-[14px]">close</span>
+                                                  </button>
+                                              )}
+                                              
+                                              <div className="grid grid-cols-[1fr_80px] gap-3 items-start">
+                                                  <div className="space-y-2">
+                                                      <select 
+                                                          value={it.productId} 
+                                                          onChange={e => setOrdItems(ordItems.map((x,i)=> i===idx ? {...x, productId: e.target.value} : x))} 
+                                                          className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg text-sm outline-none focus:border-indigo-500 font-medium text-slate-700"
+                                                      >
+                                                          <option value="">-- Chọn sản phẩm --</option>
+                                                          {activeProducts.map(p => (
+                                                              <option key={p.id} value={p.id}>{p.name} (Kho: {p.stock})</option>
+                                                          ))}
+                                                      </select>
+                                                      {selectedProd && (
+                                                          <div className="text-[11px] text-slate-500 flex items-center gap-2 px-1">
+                                                              <span>Đơn giá: <strong className="text-slate-700">{formatCurrency(price)}</strong></span>
+                                                              <span>•</span>
+                                                              <span>Tồn kho: <strong className={selectedProd.stock < qty ? 'text-rose-600' : 'text-emerald-600'}>{selectedProd.stock}</strong></span>
+                                                          </div>
+                                                      )}
+                                                  </div>
+                                                  
+                                                  <div className="space-y-2">
+                                                      <div className="flex items-center bg-white border border-slate-200 rounded-lg overflow-hidden">
+                                                          <input 
+                                                              type="number" 
+                                                              min="1" 
+                                                              value={it.qty} 
+                                                              onChange={e => setOrdItems(ordItems.map((x,i)=> i===idx ? {...x, qty: e.target.value} : x))} 
+                                                              className="w-full px-2 py-2 text-sm outline-none text-center font-bold text-slate-700" 
+                                                              placeholder="SL"
+                                                          />
+                                                      </div>
+                                                      {selectedProd && (
+                                                          <div className="text-[11px] font-bold text-indigo-600 text-right px-1">
+                                                              {formatCurrency(lineTotal)}
+                                                          </div>
+                                                      )}
+                                                  </div>
+                                              </div>
+                                          </div>
+                                      );
+                                  })}
+                              </div>
+                              
+                              {detailPreview.length > 0 && (
+                                  <div className="mt-4 pt-4 border-t border-slate-200 flex justify-between items-center">
+                                      <span className="text-sm font-medium text-slate-500">Tổng tiền hàng ({detailPreview.reduce((s, d) => s + d.q, 0)} SP)</span>
+                                      <span className="text-lg font-bold text-slate-800">{formatCurrency(totalOrder)}</span>
+                                  </div>
+                              )}
                           </div>
 
                           <div className="space-y-3">
