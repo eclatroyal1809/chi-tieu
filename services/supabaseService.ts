@@ -285,3 +285,39 @@ export const deleteShopFinance = async (id: string) => {
     const { error } = await supabase.from('shop_finances').delete().eq('id', id);
     if (error) throw error;
 };
+
+// --- SHOP STOCK MOVES ---
+export const getShopStockMoves = async (shopId?: string): Promise<any[]> => {
+    let query = supabase.from('shop_stock_moves').select('*').order('date', { ascending: false });
+    if (shopId) query = query.eq('shop_id', shopId);
+    const { data, error } = await query;
+    if (error) throw error;
+    return (data || []).map((m: any) => ({
+        id: m.id,
+        shopId: m.shop_id,
+        productId: m.product_id,
+        type: m.type, // 'IN' | 'OUT'
+        qty: Number(m.qty),
+        unitCost: Number(m.unit_cost),
+        sellingPrice: Number(m.selling_price),
+        reason: m.reason, // 'import' | 'refill' | 'order' | 'adjust'
+        refId: m.ref_id,
+        date: m.date
+    }));
+};
+
+export const addShopStockMove = async (move: any) => {
+    const { error } = await supabase.from('shop_stock_moves').insert({
+        id: move.id,
+        shop_id: move.shopId,
+        product_id: move.productId,
+        type: move.type,
+        qty: move.qty,
+        unit_cost: move.unitCost ?? 0,
+        selling_price: move.sellingPrice ?? 0,
+        reason: move.reason,
+        ref_id: move.refId || null,
+        date: move.date
+    });
+    if (error) throw error;
+};
