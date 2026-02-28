@@ -9,6 +9,8 @@ import { supabase } from './supabaseClient'; // Import to check config
 import { motion, AnimatePresence } from 'motion/react';
 import DatePicker from 'react-datepicker';
 import { vi } from 'date-fns/locale';
+// @ts-ignore
+import html2canvas from 'html2canvas';
 
 const formatShortWeekday = (nameOfDay: string) => {
     const name = nameOfDay.toLowerCase();
@@ -78,7 +80,9 @@ export default function App() {
 
   const [invForm, setInvForm] = useState({ name: '', originalPrice: '', sellingPrice: '', stock: '1', date: new Date(), accountId: AccountType.MB });
   const [ordForm, setOrdForm] = useState({ channel: 'Shopee', name: '', phone: '', address: '', productId: '', qty: '1', deposit: '', shipping: '', voucher: '', paymentFee: '', status: 'Chưa Gửi Hàng', paymentMethod: 'Đang Thanh Toán' });
+  const [ordItems, setOrdItems] = useState<{productId: string, qty: string}[]>([{ productId: '', qty: '1' }]);
   const [finForm, setFinForm] = useState({ type: 'INCOME', amount: '', desc: '', category: 'Khác', date: new Date(), accountId: AccountType.MB });
+  const [expandedOrders, setExpandedOrders] = useState<string[]>([]);
   
   const [orderTab, setOrderTab] = useState<'list' | 'create'>('list');
 
@@ -1127,24 +1131,17 @@ export default function App() {
               
               const totalCost = newProd.originalPrice * newProd.stock;
               if (totalCost > 0) {
-                  const newTx: Transaction = {
-                      id: Date.now().toString() + '_tx',
-                      date: newProd.importDate,
-                      description: `Nhập hàng ${activeShop.toUpperCase()}: ${newProd.name} (SL: ${newProd.stock})`,
-                      amount: totalCost,
-                      accountId: invForm.accountId,
-                      splitType: SplitType.ME_ONLY,
-                      type: TransactionType.EXPENSE,
-                      isSettled: false
-                  };
-                  await supabaseService.addTransaction(newTx);
-                  
-                  const account = accounts.find(a => a.id === invForm.accountId);
-                  if (account) {
-                      await supabaseService.updateAccountBalance(account.id, account.balance - totalCost);
-                      setAccounts(accounts.map(a => a.id === account.id ? { ...a, balance: a.balance - totalCost } : a));
-                  }
-                  setTransactions([newTx, ...transactions]);
+                const newFinance = {
+                    id: Date.now().toString(),
+                    shopId: activeShop,
+                    type: 'EXPENSE',
+                    amount: totalCost,
+                    description: `Nhập hàng ${activeShop.toUpperCase()}: ${newProd.name} (SL: ${newProd.stock})`,
+                    category: 'Chi phí nhập hàng',
+                    date: newProd.importDate
+                };
+                await supabaseService.addShopFinance(newFinance);
+                setShopFinances([newFinance, ...shopFinances]);
               }
               
               setProducts([newProd, ...products]);
@@ -1172,9 +1169,9 @@ export default function App() {
                               onChange={e => setInvForm({...invForm, accountId: e.target.value as AccountType})}
                               className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500"
                           >
-                              {accounts.map(acc => (
-                                  <option key={acc.id} value={acc.id}>Nguồn: {acc.name}</option>
-                              ))}
+                            {accounts.map(acc => (
+                                <option key={acc.id} value={acc.id}>{acc.name}</option>
+                            ))}
                           </select>
                       </div>
                       <div className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus-within:border-indigo-500 flex items-center">
@@ -1189,18 +1186,42 @@ export default function App() {
                   {activeProducts.length === 0 ? (
                       <p className="text-center text-slate-400 py-4 text-sm">Kho hàng trống</p>
                   ) : (
-                      activeProducts.map(p => (
-                          <div key={p.id} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex justify-between items-center">
-                              <div>
-                                  <h4 className="font-bold text-slate-800">{p.name}</h4>
-                                  <p className="text-xs text-slate-500 mt-1">Kho: <span className="font-bold text-indigo-600">{p.stock}</span> • Nhập: {new Date(p.importDate).toLocaleDateString('vi-VN')}</p>
-                              </div>
-                              <div className="text-right">
-                                  <p className="text-sm font-bold text-slate-800">{formatCurrency(p.sellingPrice)}</p>
-                                  <p className="text-[10px] text-orange-500 font-bold mt-0.5">Shopee: {formatCurrency(p.sellingPrice * 1.3)}</p>
-                              </div>
-                          </div>
-                      ))
+                    activeProducts.map(p => (
+                        <div key={p.id} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+                            <div className="flex justify-between items-start gap-3">
+                                <div>
+                                    <h4 className="font-bold text-slate-800">{p.name}</h4>
+                                    <p className="text-xs text-slate-500 mt-1">Kho: <span className="font-bold text-indigo-600">{p.stock}</span> • Nhập: {new Date(p.importDate).toLocaleDateString('vi-VN')}</p>
+                                </div>
+                                <div className="text-right">
+                                    <p className="text-sm font-bold text-slate-800">{formatCurrency(p.sellingPrice)}</p>
+                                    <p className="text-[10px] text-orange-500 font-bold mt-0.5">Shopee: {formatCurrency(p.sellingPrice * 1.3)}</p>
+                                </div>
+                            </div>
+                            <div className="mt-3 flex justify-end">
+                                <button
+                                    onClick={async () => {
+                                        const hasOrders = orders.some(o => o.productId === p.id);
+                                        const ok = window.confirm(hasOrders ? 'Sản phẩm đã có đơn hàng. Xoá vẫn giữ lịch sử đơn. Bạn chắc chắn xoá?' : 'Xoá sản phẩm này khỏi kho?');
+                                        if (!ok) return;
+                                        try {
+                                            await supabaseService.deleteShopProduct(p.id);
+                                            setProducts(prev => prev.filter(x => x.id !== p.id));
+                                            alert('Đã xoá sản phẩm');
+                                        } catch (error) {
+                                            console.error('Error deleting product:', error);
+                                            alert('Lỗi khi xoá sản phẩm');
+                                        }
+                                    }}
+                                    className="px-3 py-1.5 text-xs font-bold rounded-lg bg-rose-50 text-rose-600 border border-rose-200 active:scale-95 transition-all flex items-center gap-1"
+                                    title="Xoá sản phẩm"
+                                >
+                                    <span className="material-symbols-rounded text-sm">delete</span>
+                                    Xoá
+                                </button>
+                            </div>
+                        </div>
+                    ))
                   )}
               </div>
           </div>
@@ -1235,13 +1256,30 @@ export default function App() {
       const handleCreateOrder = async () => {
           if (!ordForm.name || !ordForm.productId) return alert('Vui lòng nhập tên KH và chọn sản phẩm');
           
-          const newOrder = {
+        const product = products.find(p => p.id === ordForm.productId);
+        if (product && qty > product.stock) {
+            alert('Số lượng vượt quá tồn kho');
+            return;
+        }
+
+        const newOrder = {
               id: Date.now().toString(),
               shopId: activeShop,
-              ...ordForm,
-              totalAmount: totalOrder,
-              netRevenue,
-              date: new Date().toISOString()
+            channel: ordForm.channel,
+            name: ordForm.name,
+            phone: ordForm.phone,
+            address: ordForm.address,
+            productId: ordForm.productId,
+            qty: qty,
+            deposit: parseSmartAmount(ordForm.deposit) || 0,
+            shipping: parseSmartAmount(ordForm.shipping) || 0,
+            voucher: parseSmartAmount(ordForm.voucher) || 0,
+            paymentFee: parseSmartAmount(ordForm.paymentFee) || 0,
+            status: ordForm.status,
+            paymentMethod: ordForm.paymentMethod,
+            totalAmount: totalOrder,
+            netRevenue,
+            date: new Date().toISOString()
           };
           
           try {
@@ -1284,32 +1322,7 @@ export default function App() {
                   };
                   await supabaseService.addShopFinance(newFinance);
                   setShopFinances([newFinance, ...shopFinances]);
-                  
-                  // Create main transaction
-                  let targetAccountId = AccountType.MB;
-                  if (value === 'Tiền Mặt') targetAccountId = AccountType.CASH;
-                  if (value === 'TECHCOMBANK') targetAccountId = AccountType.TCB;
-
-                  const newTx: Transaction = {
-                      id: Date.now().toString() + '_tx',
-                      date: new Date().toISOString(),
-                      description: `Doanh thu ${activeShop.toUpperCase()}: Đơn ${order.channel} - ${order.name}`,
-                      amount: order.netRevenue,
-                      accountId: targetAccountId,
-                      splitType: SplitType.ME_ONLY,
-                      type: TransactionType.INCOME,
-                      isSettled: false
-                  };
-                  await supabaseService.addTransaction(newTx);
-                  
-                  const account = accounts.find(a => a.id === targetAccountId);
-                  if (account) {
-                      await supabaseService.updateAccountBalance(account.id, account.balance + order.netRevenue);
-                      setAccounts(accounts.map(a => a.id === account.id ? { ...a, balance: a.balance + order.netRevenue } : a));
-                  }
-                  setTransactions([newTx, ...transactions]);
-                  
-                  alert(`Đã tự động tạo phiếu thu ${formatCurrency(order.netRevenue)} vào Sổ quỹ và Thu-Chi!`);
+                  alert('Đã ghi nhận thanh toán trong Tài chính cửa hàng');
               }
               
               setOrders(orders.map(o => o.id === orderId ? updatedOrder : o));
@@ -1372,6 +1385,25 @@ export default function App() {
                                       </div>
                                   </div>
                               )}
+
+                              <div className="mt-4 space-y-2">
+                                  <div className="flex items-center justify-between mb-1">
+                                      <span className="text-xs font-bold text-slate-500 uppercase">Nhiều sản phẩm</span>
+                                      <button onClick={() => setOrdItems([...ordItems, { productId: '', qty: '1' }])} className="text-xs font-bold px-2 py-1 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-200 active:scale-95 transition-all">Thêm</button>
+                                  </div>
+                                  {ordItems.map((it, idx) => (
+                                      <div key={idx} className="grid grid-cols-[1fr_auto_auto] gap-2 items-center bg-white p-2 rounded-lg border border-slate-200">
+                                          <select value={it.productId} onChange={e => setOrdItems(ordItems.map((x,i)=> i===idx ? {...x, productId: e.target.value} : x))} className="bg-white border border-slate-200 px-2 py-2 rounded-lg text-sm outline-none">
+                                              <option value="">Chọn sản phẩm</option>
+                                              {activeProducts.map(p => (
+                                                  <option key={p.id} value={p.id}>{p.name} (Kho: {p.stock})</option>
+                                              ))}
+                                          </select>
+                                          <input type="number" min="1" value={it.qty} onChange={e => setOrdItems(ordItems.map((x,i)=> i===idx ? {...x, qty: e.target.value} : x))} className="w-20 bg-slate-50 border border-slate-200 px-2 py-2 rounded-lg text-sm outline-none text-center font-bold" />
+                                          <button onClick={() => setOrdItems(ordItems.filter((_,i)=>i!==idx))} className="px-2 py-2 rounded-lg bg-rose-50 text-rose-600 border border-rose-200 active:scale-95">Xoá</button>
+                                      </div>
+                                  ))}
+                              </div>
                           </div>
 
                           <div className="space-y-3">
@@ -1401,7 +1433,79 @@ export default function App() {
                               </div>
                           </div>
 
-                          <button onClick={handleCreateOrder} className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl shadow-md shadow-blue-200 active:scale-95 transition-all">Tạo đơn hàng</button>
+                          <div className="grid grid-cols-2 gap-2">
+                              <button onClick={handleCreateOrder} className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl shadow-md shadow-blue-200 active:scale-95 transition-all">Tạo đơn</button>
+                              <button onClick={async () => {
+                                  if (ordItems.every(i => !i.productId)) {
+                                      alert('Vui lòng thêm ít nhất 1 sản phẩm trong danh sách nhiều sản phẩm');
+                                      return;
+                                  }
+                                  const isShopeeLocal = ordForm.channel === 'Shopee';
+                                  const detail = ordItems.filter(i=>i.productId).map(i => {
+                                      const p = products.find(pp => pp.id === i.productId);
+                                      const q = parseInt(i.qty) || 1;
+                                      let price = p ? p.sellingPrice : 0;
+                                      if (isShopeeLocal) price = price * 1.3;
+                                      return { p, q, price, total: q * price, productId: i.productId };
+                                  });
+                                  if (detail.length === 0) {
+                                      alert('Danh sách sản phẩm không hợp lệ');
+                                      return;
+                                  }
+                                  for (const d of detail) {
+                                      if (!d.p) { alert('Sản phẩm không hợp lệ'); return; }
+                                      if (d.q > d.p.stock) { alert(`Số lượng vượt tồn: ${d.p.name}`); return; }
+                                  }
+                                  const total = detail.reduce((s,d)=>s+d.total,0);
+                                  const voucherLocal = parseSmartAmount(ordForm.voucher) || 0;
+                                  const baseForFeeLocal = Math.max(0, total - voucherLocal);
+                                  const fixedFeeLocal = isShopeeLocal ? baseForFeeLocal * 0.14 : 0;
+                                  const serviceFeeLocal = isShopeeLocal ? 3000 : 0;
+                                  const vatLocal = isShopeeLocal ? baseForFeeLocal * 0.01 : 0;
+                                  const pitLocal = isShopeeLocal ? baseForFeeLocal * 0.005 : 0;
+                                  const paymentFeeLocal = isShopeeLocal ? (parseSmartAmount(ordForm.paymentFee) || 0) : 0;
+                                  const netLocal = total - fixedFeeLocal - serviceFeeLocal - vatLocal - pitLocal - paymentFeeLocal;
+                                  const newOrder = {
+                                      id: Date.now().toString(),
+                                      shopId: activeShop,
+                                      channel: ordForm.channel,
+                                      name: ordForm.name,
+                                      phone: ordForm.phone,
+                                      address: ordForm.address,
+                                      productId: JSON.stringify(ordItems.map(i => ({ productId: i.productId, qty: parseInt(i.qty)||1 }))),
+                                      qty: detail.reduce((s,d)=>s+d.q,0),
+                                      deposit: parseSmartAmount(ordForm.deposit) || 0,
+                                      shipping: parseSmartAmount(ordForm.shipping) || 0,
+                                      voucher: parseSmartAmount(ordForm.voucher) || 0,
+                                      paymentFee: parseSmartAmount(ordForm.paymentFee) || 0,
+                                      status: ordForm.status,
+                                      paymentMethod: ordForm.paymentMethod,
+                                      totalAmount: total,
+                                      netRevenue: netLocal,
+                                      date: new Date().toISOString()
+                                  };
+                                  try {
+                                      await supabaseService.addShopOrder(newOrder);
+                                      for (const d of detail) {
+                                          if (d.p) {
+                                              await supabaseService.updateShopProductStock(d.p.id, d.p.stock - d.q);
+                                          }
+                                      }
+                                      setOrders([newOrder, ...orders]);
+                                      setProducts(products.map(p => {
+                                          const d = detail.find(x => x.p && x.p.id === p.id);
+                                          return d ? { ...p, stock: p.stock - d.q } : p;
+                                      }));
+                                      alert('Tạo đơn nhiều sản phẩm thành công!');
+                                      setOrdForm({ channel: 'Shopee', name: '', phone: '', address: '', productId: '', qty: '1', deposit: '', shipping: '', voucher: '', paymentFee: '', status: 'Chưa Gửi Hàng', paymentMethod: 'Đang Thanh Toán' });
+                                      setOrdItems([{ productId: '', qty: '1' }]);
+                                      setOrderTab('list');
+                                  } catch (error) {
+                                      console.error('Error creating multi order:', error);
+                                      alert('Lỗi khi tạo đơn nhiều sản phẩm');
+                                  }
+                              }} className="w-full py-4 bg-indigo-600 text-white font-bold rounded-xl shadow-md shadow-indigo-200 active:scale-95 transition-all">Tạo đơn (nhiều SP)</button>
+                          </div>
                       </div>
                   </div>
               ) : (
@@ -1421,7 +1525,19 @@ export default function App() {
                                               }`}>{o.channel}</span>
                                               <span className="text-xs font-bold text-slate-800">{o.name}</span>
                                           </div>
-                                          <p className="text-[10px] text-slate-500">{new Date(o.date).toLocaleDateString('vi-VN')} • {products.find(p => p.id === o.productId)?.name} (x{o.qty})</p>
+                                          <p className="text-[10px] text-slate-500">
+                                              {(() => {
+                                                  try {
+                                                      const arr = JSON.parse(o.productId);
+                                                      if (Array.isArray(arr) && arr.length > 0) {
+                                                          const totalQ = arr.reduce((s:any, it:any) => s + (it.qty || 1), 0);
+                                                          return `${new Date(o.date).toLocaleDateString('vi-VN')} • ${arr.length} sản phẩm (x${totalQ})`;
+                                                      }
+                                                  } catch (e) {}
+                                                  const nm = products.find(p => p.id === o.productId)?.name || 'Sản phẩm';
+                                                  return `${new Date(o.date).toLocaleDateString('vi-VN')} • ${nm} (x${o.qty})`;
+                                              })()}
+                                          </p>
                                       </div>
                                       <div className="text-right">
                                           <p className="text-sm font-bold text-emerald-600">{formatCurrency(o.netRevenue)}</p>
@@ -1460,8 +1576,153 @@ export default function App() {
                                               ))}
                                           </select>
                                       </div>
+                                  {expandedOrders.includes(o.id) && (
+                                      <div className="mt-3 p-3 bg-slate-50 rounded-lg border border-slate-100 text-xs">
+                                          {(() => {
+                                              let items: any[] = [];
+                                              try { const arr = JSON.parse(o.productId); if (Array.isArray(arr)) items = arr; } catch(e){}
+                                              if (items.length === 0) items = [{ productId: o.productId, qty: o.qty }];
+                                              const isShopeeLocal = o.channel === 'Shopee';
+                                              const rows = items.map((it, idx) => {
+                                                  const prod = products.find(p => p.id === it.productId);
+                                                  const name = prod?.name || 'Sản phẩm';
+                                                  const unit = prod ? prod.sellingPrice : 0;
+                                                  const price = isShopeeLocal ? unit * 1.3 : unit;
+                                                  const qty = parseInt(it.qty) || 1;
+                                                  const line = qty * price;
+                                                  return (
+                                                      <div key={idx} className="grid grid-cols-[1fr_48px_100px] gap-2 py-1">
+                                                          <div className="font-medium text-slate-700">{name}</div>
+                                                          <div className="text-right">x{qty}</div>
+                                                          <div className="text-right font-bold">{formatCurrency(line)}</div>
+                                                      </div>
+                                                  );
+                                              });
+                                              return <div>{rows}</div>;
+                                          })()}
+                                      </div>
+                                  )}
+                                  <div className="flex gap-2 mt-3">
+                                      <button
+                                          onClick={() => {
+                                              setExpandedOrders(prev => prev.includes(o.id) ? prev.filter(id => id !== o.id) : [...prev, o.id]);
+                                          }}
+                                          className="px-3 py-2 text-xs font-bold rounded-lg bg-slate-100 text-slate-700 border border-slate-200 active:scale-95"
+                                      >Chi tiết</button>
+                                      <button
+                                          onClick={async () => {
+                                              if (!window.confirm('Xoá đơn hàng này?')) return;
+                                              try {
+                                                  if (o.productId && o.productId.startsWith('[')) {
+                                                      try {
+                                                          const arr = JSON.parse(o.productId);
+                                                          for (const it of arr) {
+                                                              const prod = products.find(p => p.id === it.productId);
+                                                              const q = parseInt(it.qty) || 1;
+                                                              if (prod) {
+                                                                  await supabaseService.updateShopProductStock(prod.id, prod.stock + q);
+                                                              }
+                                                          }
+                                                          setProducts(products.map(p => {
+                                                              const it = arr.find((x:any) => x.productId === p.id);
+                                                              if (it) {
+                                                                  const q = parseInt(it.qty) || 1;
+                                                                  return { ...p, stock: p.stock + q };
+                                                              }
+                                                              return p;
+                                                          }));
+                                                      } catch (e) {}
+                                                  } else {
+                                                      const prod = products.find(p => p.id === o.productId);
+                                                      if (prod) {
+                                                          await supabaseService.updateShopProductStock(prod.id, prod.stock + (o.qty || 1));
+                                                          setProducts(products.map(p => p.id === prod.id ? { ...p, stock: p.stock + (o.qty || 1) } : p));
+                                                      }
+                                                  }
+                                                  await supabaseService.deleteShopOrder(o.id);
+                                                  setOrders(orders.filter(x => x.id !== o.id));
+                                                  alert('Đã xoá đơn');
+                                              } catch (err) {
+                                                  console.error('Delete order error', err);
+                                                  alert('Lỗi khi xoá đơn');
+                                              }
+                                          }}
+                                          className="px-3 py-2 text-xs font-bold rounded-lg bg-rose-50 text-rose-600 border border-rose-200 active:scale-95"
+                                      >Xoá đơn</button>
+                                      <button
+                                          onClick={async () => {
+                                              const container = document.createElement('div');
+                                              container.style.position = 'fixed';
+                                              container.style.left = '-9999px';
+                                              container.style.top = '0';
+                                              container.style.width = '600px';
+                                              container.style.background = '#fff';
+                                              container.style.padding = '24px';
+                                              container.style.fontFamily = 'ui-sans-serif, system-ui';
+                                              const title = document.createElement('h3');
+                                              title.textContent = 'HOÁ ĐƠN';
+                                              title.style.margin = '0 0 8px 0';
+                                              title.style.fontWeight = '800';
+                                              const meta = document.createElement('div');
+                                              meta.textContent = `${o.channel} • ${o.name} • ${new Date(o.date).toLocaleDateString('vi-VN')}`;
+                                              meta.style.fontSize = '12px';
+                                              meta.style.color = '#64748b';
+                                              meta.style.marginBottom = '12px';
+                                              const table = document.createElement('div');
+                                              table.style.display = 'grid';
+                                              table.style.gridTemplateColumns = '1fr 80px 120px';
+                                              table.style.rowGap = '6px';
+                                              table.style.columnGap = '8px';
+                                              const header = ['Sản phẩm','SL','Thành tiền'];
+                                              header.forEach(t => {
+                                                  const el = document.createElement('strong');
+                                                  el.textContent = t;
+                                                  table.appendChild(el);
+                                              });
+                                              let items:any[] = [];
+                                              try { const arr = JSON.parse(o.productId); if (Array.isArray(arr)) items = arr; } catch(e){}
+                                              if (items.length === 0) items = [{ productId: o.productId, qty: o.qty }];
+                                              let total = 0;
+                                              for (const it of items) {
+                                                  const prod = products.find(p => p.id === it.productId);
+                                                  const name = prod?.name || 'Sản phẩm';
+                                                  const unit = prod ? prod.sellingPrice : 0;
+                                                  const adj = o.channel === 'Shopee' ? unit * 1.3 : unit;
+                                                  const qty = parseInt(it.qty) || 1;
+                                                  const line = adj * qty;
+                                                  total += line;
+                                                  const n1 = document.createElement('div'); n1.textContent = name; table.appendChild(n1);
+                                                  const n2 = document.createElement('div'); n2.textContent = `x${qty}`; n2.style.textAlign = 'right'; table.appendChild(n2);
+                                                  const n3 = document.createElement('div'); n3.textContent = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(line); n3.style.textAlign = 'right'; table.appendChild(n3);
+                                              }
+                                              const totalRow1 = document.createElement('div'); totalRow1.textContent = 'Tổng'; totalRow1.style.marginTop = '6px'; table.appendChild(totalRow1);
+                                              const totalRow2 = document.createElement('div'); table.appendChild(totalRow2);
+                                              const totalRow3 = document.createElement('div'); totalRow3.textContent = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(o.totalAmount || total); totalRow3.style.textAlign = 'right'; table.appendChild(totalRow3);
+                                              const netRow1 = document.createElement('div'); netRow1.textContent = 'Net'; table.appendChild(netRow1);
+                                              const netRow2 = document.createElement('div'); table.appendChild(netRow2);
+                                              const netRow3 = document.createElement('div'); netRow3.textContent = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(o.netRevenue); netRow3.style.textAlign = 'right'; table.appendChild(netRow3);
+                                              container.appendChild(title);
+                                              container.appendChild(meta);
+                                              container.appendChild(table);
+                                              document.body.appendChild(container);
+                                              try {
+                                                  const canvas = await html2canvas(container, { scale: 2, backgroundColor: '#ffffff' });
+                                                  const link = document.createElement('a');
+                                                  link.download = `Hoa-don-${o.name}-${new Date(o.date).toLocaleDateString('vi-VN').replace(/\//g,'-')}.png`;
+                                                  link.href = canvas.toDataURL('image/png');
+                                                  link.click();
+                                              } catch (err) {
+                                                  console.error('PNG export error', err);
+                                                  alert('Lỗi khi xuất PNG');
+                                              } finally {
+                                                  document.body.removeChild(container);
+                                              }
+                                          }}
+                                          className="px-3 py-2 text-xs font-bold rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-200 active:scale-95"
+                                      >Xuất PNG</button>
                                   </div>
-                              </div>
+                                  </div>
+                                  </div>
                           ))
                       )}
                   </div>
@@ -1495,34 +1756,11 @@ export default function App() {
               date: finForm.date.toISOString()
           };
           
-          try {
-              await supabaseService.addShopFinance(newFinance);
-              
-              const newTx: Transaction = {
-                  id: Date.now().toString() + '_tx',
-                  date: newFinance.date,
-                  description: `${newFinance.type === 'INCOME' ? 'Doanh thu' : 'Chi phí'} ${activeShop.toUpperCase()}: ${newFinance.description}`,
-                  amount: newFinance.amount,
-                  accountId: finForm.accountId,
-                  splitType: SplitType.ME_ONLY,
-                  type: newFinance.type === 'INCOME' ? TransactionType.INCOME : TransactionType.EXPENSE,
-                  isSettled: false
-              };
-              await supabaseService.addTransaction(newTx);
-              
-              const account = accounts.find(a => a.id === finForm.accountId);
-              if (account) {
-                  const newBalance = newFinance.type === 'INCOME' 
-                      ? account.balance + newFinance.amount 
-                      : account.balance - newFinance.amount;
-                  await supabaseService.updateAccountBalance(account.id, newBalance);
-                  setAccounts(accounts.map(a => a.id === account.id ? { ...a, balance: newBalance } : a));
-              }
-              setTransactions([newTx, ...transactions]);
-              
-              setShopFinances([newFinance, ...shopFinances]);
-              setFinForm({ type: 'INCOME', amount: '', desc: '', category: 'Khác', date: new Date(), accountId: AccountType.MB });
-          } catch (error) {
+      try {
+          await supabaseService.addShopFinance(newFinance);
+          setShopFinances([newFinance, ...shopFinances]);
+          setFinForm({ type: 'INCOME', amount: '', desc: '', category: 'Khác', date: new Date(), accountId: AccountType.MB });
+      } catch (error) {
               console.error("Error adding finance:", error);
               alert("Lỗi khi thêm giao dịch");
           }
@@ -1599,9 +1837,25 @@ export default function App() {
                                       </div>
                                   </div>
                               </div>
-                              <p className={`font-bold text-sm ${f.type === 'INCOME' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                                  {f.type === 'INCOME' ? '+' : '-'}{formatCurrency(f.amount)}
-                              </p>
+                              <div className="flex items-center gap-2">
+                                  <p className={`font-bold text-sm ${f.type === 'INCOME' ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                      {f.type === 'INCOME' ? '+' : '-'}{formatCurrency(f.amount)}
+                                  </p>
+                                  <button
+                                      onClick={async () => {
+                                          if (!window.confirm('Xoá giao dịch này?')) return;
+                                          try {
+                                              await supabaseService.deleteShopFinance(f.id);
+                                              setShopFinances(shopFinances.filter(x => x.id !== f.id));
+                                              alert('Đã xoá giao dịch');
+                                          } catch (err) {
+                                              console.error('Delete finance error', err);
+                                              alert('Lỗi khi xoá giao dịch');
+                                          }
+                                      }}
+                                      className="px-2 py-1 text-[10px] font-bold rounded-lg bg-rose-50 text-rose-600 border border-rose-200 active:scale-95"
+                                  >Xoá</button>
+                              </div>
                           </div>
                       ))
                   )}

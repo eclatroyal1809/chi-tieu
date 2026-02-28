@@ -182,6 +182,13 @@ export const updateShopProductStock = async (productId: string, newStock: number
     if (error) throw error;
 };
 
+export const deleteShopProduct = async (productId: string) => {
+    const { error } = await supabase.from('shop_products')
+        .delete()
+        .eq('id', productId);
+    if (error) throw error;
+};
+
 // --- SHOP ORDERS ---
 export const getShopOrders = async (): Promise<any[]> => {
     const { data, error } = await supabase.from('shop_orders').select('*').order('date', { ascending: false });
@@ -216,11 +223,11 @@ export const addShopOrder = async (order: any) => {
         phone: order.phone,
         address: order.address,
         product_id: order.productId,
-        qty: order.qty,
-        deposit: order.deposit,
-        shipping: order.shipping,
-        voucher: order.voucher,
-        payment_fee: order.paymentFee,
+        qty: Number(order.qty) || 0,
+        deposit: Number(order.deposit) || 0,
+        shipping: Number(order.shipping) || 0,
+        voucher: Number(order.voucher) || 0,
+        payment_fee: Number(order.paymentFee) || 0,
         status: order.status,
         payment_method: order.paymentMethod,
         total_amount: order.totalAmount,
@@ -238,6 +245,11 @@ export const updateShopOrder = async (orderId: string, updates: any) => {
     const { error } = await supabase.from('shop_orders')
         .update(dbUpdates)
         .eq('id', orderId);
+    if (error) throw error;
+};
+
+export const deleteShopOrder = async (orderId: string) => {
+    const { error } = await supabase.from('shop_orders').delete().eq('id', orderId);
     if (error) throw error;
 };
 
@@ -269,3 +281,7 @@ export const addShopFinance = async (finance: any) => {
     if (error) throw error;
 };
 
+export const deleteShopFinance = async (id: string) => {
+    const { error } = await supabase.from('shop_finances').delete().eq('id', id);
+    if (error) throw error;
+};
