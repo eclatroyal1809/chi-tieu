@@ -182,6 +182,18 @@ export const updateShopProductStock = async (productId: string, newStock: number
     if (error) throw error;
 };
 
+export const updateShopProduct = async (productId: string, updates: any) => {
+    const dbUpdates: any = {};
+    if (updates.name !== undefined) dbUpdates.name = updates.name;
+    if (updates.originalPrice !== undefined) dbUpdates.original_price = updates.originalPrice;
+    if (updates.sellingPrice !== undefined) dbUpdates.selling_price = updates.sellingPrice;
+    if (updates.importDate !== undefined) dbUpdates.import_date = updates.importDate;
+    const { error } = await supabase.from('shop_products')
+        .update(dbUpdates)
+        .eq('id', productId);
+    if (error) throw error;
+};
+
 export const deleteShopProduct = async (productId: string) => {
     const { error } = await supabase.from('shop_products')
         .delete()

@@ -71,18 +71,22 @@ export default function App() {
   const [tempTetSavingBalance, setTempTetSavingBalance] = useState('');
   
   // Shop State
-  const [activeShop, setActiveShop] = useState<'eclat' | 'elank'>('eclat');
+  const [activeShop, setActiveShop] = useState<string>('elank');
   const [shopView, setShopView] = useState<'overview' | 'inventory' | 'finance' | 'orders'>('overview');
 
   const [products, setProducts] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [shopFinances, setShopFinances] = useState<any[]>([]);
+  const [invSearch, setInvSearch] = useState('');
+  const [expandedInvGroups, setExpandedInvGroups] = useState<string[]>([]);
+  const [editingProduct, setEditingProduct] = useState<any | null>(null);
+  const [editProdForm, setEditProdForm] = useState({ name: '', originalPrice: '', sellingPrice: '' });
 
   const [invForm, setInvForm] = useState({ name: '', originalPrice: '', sellingPrice: '', stock: '1', date: new Date(), accountId: AccountType.MB });
   const [ordForm, setOrdForm] = useState({ channel: 'Shopee', name: '', phone: '', address: '', productId: '', qty: '1', deposit: '', shipping: '', voucher: '', paymentFee: '', status: 'Chưa Gửi Hàng', paymentMethod: 'Đang Thanh Toán' });
-  const [ordItems, setOrdItems] = useState<{productId: string, qty: string}[]>([
-    { productId: '', qty: '1' },
-    { productId: '', qty: '1' }
+  const [ordItems, setOrdItems] = useState<{productId: string, qty: string, price?: string}[]>([
+    { productId: '', qty: '1', price: '' },
+    { productId: '', qty: '1', price: '' }
   ]);
   const [finForm, setFinForm] = useState({ type: 'INCOME', amount: '', desc: '', category: 'Khác', date: new Date(), accountId: AccountType.MB });
   const [expandedOrders, setExpandedOrders] = useState<string[]>([]);
@@ -1117,7 +1121,43 @@ export default function App() {
   };
 
   const renderShopInventory = () => {
-      const activeProducts = products.filter(p => p.shopId === activeShop);
+      const normalizeProductName = (name: any) => String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      const invSearchText = invSearch.trim().toLowerCase();
+      const filteredProducts = products
+          .filter(p => p.shopId === activeShop)
+          .filter(p => !invSearchText || normalizeProductName(p.name).includes(invSearchText));
+      
+      const grouped = new Map<string, any>();
+      for (const p of filteredProducts) {
+          const key = normalizeProductName(p.name) || String(p.id);
+          const displayName = String(p.name || '').trim() || 'Sản phẩm';
+          if (!grouped.has(key)) {
+              grouped.set(key, {
+                  key,
+                  name: displayName,
+                  products: [],
+                  totalStock: 0,
+                  minOriginalPrice: Number(p.originalPrice) || 0,
+                  maxOriginalPrice: Number(p.originalPrice) || 0,
+                  minSellingPrice: Number(p.sellingPrice) || 0,
+                  maxSellingPrice: Number(p.sellingPrice) || 0,
+                  lastImportDate: p.importDate
+              });
+          }
+          const g = grouped.get(key);
+          g.products.push(p);
+          g.totalStock += Number(p.stock) || 0;
+          g.minOriginalPrice = Math.min(g.minOriginalPrice, Number(p.originalPrice) || 0);
+          g.maxOriginalPrice = Math.max(g.maxOriginalPrice, Number(p.originalPrice) || 0);
+          g.minSellingPrice = Math.min(g.minSellingPrice, Number(p.sellingPrice) || 0);
+          g.maxSellingPrice = Math.max(g.maxSellingPrice, Number(p.sellingPrice) || 0);
+          if (p.importDate && (!g.lastImportDate || new Date(p.importDate).getTime() > new Date(g.lastImportDate).getTime())) {
+              g.lastImportDate = p.importDate;
+          }
+      }
+      
+      const groups = Array.from(grouped.values())
+          .sort((a, b) => (Number(a.totalStock) - Number(b.totalStock)) || String(a.name).localeCompare(String(b.name), 'vi'));
       
       const handleAddProduct = async () => {
           if (!invForm.name || !invForm.originalPrice || !invForm.sellingPrice) return alert('Vui lòng nhập đủ thông tin');
@@ -1200,99 +1240,238 @@ export default function App() {
               </div>
 
               <div className="space-y-3">
-                  <h3 className="font-bold text-slate-800 px-1">Danh sách sản phẩm</h3>
-                  {activeProducts.length === 0 ? (
+                  <div className="flex items-center justify-between px-1 gap-3">
+                      <h3 className="font-bold text-slate-800">Danh sách sản phẩm</h3>
+                      <div className="flex-1 max-w-[260px]">
+                          <input
+                              value={invSearch}
+                              onChange={e => setInvSearch(e.target.value)}
+                              placeholder="Tìm sản phẩm..."
+                              className="w-full bg-white border border-slate-200 px-3 py-2 rounded-xl text-sm outline-none focus:border-indigo-500"
+                          />
+                      </div>
+                  </div>
+                  {groups.length === 0 ? (
                       <p className="text-center text-slate-400 py-4 text-sm">Kho hàng trống</p>
                   ) : (
-                    activeProducts.map(p => (
-                        <div key={p.id} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-                            <div className="flex justify-between items-start gap-3">
-                                <div>
-                                    <h4 className="font-bold text-slate-800">{p.name}</h4>
-                                    <p className="text-xs text-slate-500 mt-1">Kho: <span className="font-bold text-indigo-600">{p.stock}</span> • Nhập: {new Date(p.importDate).toLocaleDateString('vi-VN')}</p>
+                    groups.map(g => {
+                        const isExpanded = expandedInvGroups.includes(g.key);
+                        const stockBadge = g.totalStock <= 0 ? 'bg-rose-50 text-rose-700 border-rose-100' : g.totalStock <= 3 ? 'bg-amber-50 text-amber-700 border-amber-100' : 'bg-emerald-50 text-emerald-700 border-emerald-100';
+                        const originalText = g.minOriginalPrice === g.maxOriginalPrice ? formatCurrency(g.minOriginalPrice) : `${formatCurrency(g.minOriginalPrice)} - ${formatCurrency(g.maxOriginalPrice)}`;
+                        const sellingText = g.minSellingPrice === g.maxSellingPrice ? formatCurrency(g.minSellingPrice) : `${formatCurrency(g.minSellingPrice)} - ${formatCurrency(g.maxSellingPrice)}`;
+                        const lots = g.products.slice().sort((a: any, b: any) => (Number(a.stock) - Number(b.stock)) || new Date(b.importDate).getTime() - new Date(a.importDate).getTime());
+                        return (
+                            <div key={g.key} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="flex items-start gap-3">
+                                        <div className={`min-w-[72px] h-[56px] rounded-2xl flex flex-col items-center justify-center border ${stockBadge}`}>
+                                            <div className="text-xl font-black leading-none">{g.totalStock}</div>
+                                            <div className="text-[10px] font-bold uppercase leading-none mt-1">{g.totalStock <= 0 ? 'Hết' : 'Còn'}</div>
+                                        </div>
+                                        <div>
+                                            <h4 className="font-bold text-slate-800 leading-snug">{g.name}</h4>
+                                            <div className="text-[11px] text-slate-500 mt-1">
+                                                {lots.length} dòng • Nhập gần nhất: {g.lastImportDate ? new Date(g.lastImportDate).toLocaleDateString('vi-VN') : '-'}
+                                                {g.totalStock <= 0 ? ' • Hết hàng' : g.totalStock <= 3 ? ' • Sắp hết' : ''}
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2 text-[11px]">
+                                                <div className="text-slate-600">Giá gốc: <span className="font-bold">{originalText}</span></div>
+                                                <div className="text-slate-600">Giá bán: <span className="font-bold text-slate-800">{sellingText}</span></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => setExpandedInvGroups(prev => prev.includes(g.key) ? prev.filter(x => x !== g.key) : [...prev, g.key])}
+                                        className="px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-100 text-slate-700 border border-slate-200 active:scale-95 transition-all"
+                                    >
+                                        {isExpanded ? 'Ẩn' : 'Chi tiết'}
+                                    </button>
                                 </div>
-                                <div className="text-right">
-                                    <p className="text-sm font-bold text-slate-800">{formatCurrency(p.sellingPrice)}</p>
-                                    <p className="text-[10px] text-orange-500 font-bold mt-0.5">Shopee: {formatCurrency(p.sellingPrice * 1.3)}</p>
-                                </div>
+                                
+                                {isExpanded && (
+                                    <div className="mt-4 space-y-2">
+                                        {lots.map((p: any) => (
+                                            <div key={p.id} className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div>
+                                                        <div className="text-sm font-bold text-slate-800">Tồn: <span className="text-indigo-600">{p.stock}</span></div>
+                                                        <div className="text-[11px] text-slate-500 mt-1">Nhập: {new Date(p.importDate).toLocaleDateString('vi-VN')}</div>
+                                                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2 text-[11px]">
+                                                            <div className="text-slate-600">Giá gốc: <span className="font-bold">{formatCurrency(p.originalPrice)}</span></div>
+                                                            <div className="text-slate-600">Giá bán: <span className="font-bold text-slate-800">{formatCurrency(p.sellingPrice)}</span></div>
+                                                            <div className="text-orange-600 font-bold">Shopee: {formatCurrency(p.sellingPrice * 1.3)}</div>
+                                                        </div>
+                                                    </div>
+                                                    <button
+                                                        onClick={() => {
+                                                            setEditingProduct(p);
+                                                            setEditProdForm({
+                                                                name: p.name || '',
+                                                                originalPrice: formatNumberInput(String(p.originalPrice || 0)),
+                                                                sellingPrice: formatNumberInput(String(p.sellingPrice || 0))
+                                                            });
+                                                        }}
+                                                        className="px-3 py-1.5 text-xs font-bold rounded-lg bg-white text-slate-700 border border-slate-200 active:scale-95 transition-all flex items-center gap-1"
+                                                        title="Chỉnh sửa sản phẩm"
+                                                    >
+                                                        <span className="material-symbols-rounded text-sm">edit</span>
+                                                        Sửa
+                                                    </button>
+                                                </div>
+                                                <div className="mt-3 flex justify-end gap-2">
+                                                    <button
+                                                        onClick={async () => {
+                                                            const qtyStr = window.prompt('Nhập số lượng cần nhập thêm', '1');
+                                                            if (!qtyStr) return;
+                                                            const qty = parseInt(qtyStr);
+                                                            if (isNaN(qty) || qty <= 0) { alert('Số lượng không hợp lệ'); return; }
+                                                            const priceStr = window.prompt('Giá gốc/đơn vị để ghi nhận chi phí (tuỳ chọn)', String(p.originalPrice || 0));
+                                                            const unitCost = parseSmartAmount(priceStr || '') || 0;
+                                                            try {
+                                                                const newStock = p.stock + qty;
+                                                                await supabaseService.updateShopProductStock(p.id, newStock);
+                                                                setProducts(prev => prev.map(x => x.id === p.id ? { ...x, stock: newStock } : x));
+                                                                if (unitCost > 0) {
+                                                                    const newFinance = {
+                                                                        id: Date.now().toString(),
+                                                                        shopId: activeShop,
+                                                                        type: 'EXPENSE',
+                                                                        amount: unitCost * qty,
+                                                                        description: `Nhập thêm hàng: ${p.name} (SL: ${qty})`,
+                                                                        category: 'Chi phí nhập hàng',
+                                                                        date: new Date().toISOString()
+                                                                    };
+                                                                    await supabaseService.addShopFinance(newFinance);
+                                                                    setShopFinances([newFinance, ...shopFinances]);
+                                                                }
+                                                                const move = {
+                                                                    id: Date.now().toString() + '_in',
+                                                                    shopId: activeShop,
+                                                                    productId: p.id,
+                                                                    type: 'IN',
+                                                                    qty,
+                                                                    unitCost: unitCost || 0,
+                                                                    sellingPrice: 0,
+                                                                    reason: 'refill',
+                                                                    refId: null,
+                                                                    date: new Date().toISOString()
+                                                                };
+                                                                await supabaseService.addShopStockMove(move);
+                                                                alert('Đã cập nhật tồn kho');
+                                                            } catch (error) {
+                                                                console.error('Refill error:', error);
+                                                                alert('Lỗi khi nhập thêm hàng');
+                                                            }
+                                                        }}
+                                                        className="px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 active:scale-95 transition-all flex items-center gap-1"
+                                                        title="Nhập thêm hàng"
+                                                    >
+                                                        <span className="material-symbols-rounded text-sm">add</span>
+                                                        Nhập thêm
+                                                    </button>
+                                                    <button
+                                                        onClick={async () => {
+                                                            const hasOrders = orders.some(o => o.productId === p.id);
+                                                            const ok = window.confirm(hasOrders ? 'Sản phẩm đã có đơn hàng. Xoá vẫn giữ lịch sử đơn. Bạn chắc chắn xoá?' : 'Xoá sản phẩm này khỏi kho?');
+                                                            if (!ok) return;
+                                                            try {
+                                                                await supabaseService.deleteShopProduct(p.id);
+                                                                setProducts(prev => prev.filter(x => x.id !== p.id));
+                                                                alert('Đã xoá sản phẩm');
+                                                            } catch (error) {
+                                                                console.error('Error deleting product:', error);
+                                                                alert('Lỗi khi xoá sản phẩm');
+                                                            }
+                                                        }}
+                                                        className="px-3 py-1.5 text-xs font-bold rounded-lg bg-rose-50 text-rose-600 border border-rose-200 active:scale-95 transition-all flex items-center gap-1"
+                                                        title="Xoá sản phẩm"
+                                                    >
+                                                        <span className="material-symbols-rounded text-sm">delete</span>
+                                                        Xoá
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
-                            <div className="mt-3 flex justify-end gap-2">
-                                <button
-                                    onClick={async () => {
-                                        const qtyStr = window.prompt('Nhập số lượng cần nhập thêm', '1');
-                                        if (!qtyStr) return;
-                                        const qty = parseInt(qtyStr);
-                                        if (isNaN(qty) || qty <= 0) { alert('Số lượng không hợp lệ'); return; }
-                                        const priceStr = window.prompt('Giá gốc/đơn vị để ghi nhận chi phí (tuỳ chọn)', String(p.originalPrice || 0));
-                                        let unitCost = parseSmartAmount(priceStr || '') || 0;
-                                        try {
-                                            const newStock = p.stock + qty;
-                                            await supabaseService.updateShopProductStock(p.id, newStock);
-                                            setProducts(prev => prev.map(x => x.id === p.id ? { ...x, stock: newStock } : x));
-                                            
-                                            if (unitCost > 0) {
-                                                const newFinance = {
-                                                    id: Date.now().toString(),
-                                                    shopId: activeShop,
-                                                    type: 'EXPENSE',
-                                                    amount: unitCost * qty,
-                                                    description: `Nhập thêm hàng: ${p.name} (SL: ${qty})`,
-                                                    category: 'Chi phí nhập hàng',
-                                                    date: new Date().toISOString()
-                                                };
-                                                await supabaseService.addShopFinance(newFinance);
-                                                setShopFinances([newFinance, ...shopFinances]);
-                                            }
-                                            const move = {
-                                                id: Date.now().toString() + '_in',
-                                                shopId: activeShop,
-                                                productId: p.id,
-                                                type: 'IN',
-                                                qty,
-                                                unitCost: unitCost || 0,
-                                                sellingPrice: 0,
-                                                reason: 'refill',
-                                                refId: null,
-                                                date: new Date().toISOString()
-                                            };
-                                            await supabaseService.addShopStockMove(move);
-                                            alert('Đã cập nhật tồn kho');
-                                        } catch (error) {
-                                            console.error('Refill error:', error);
-                                            alert('Lỗi khi nhập thêm hàng');
-                                        }
-                                    }}
-                                    className="px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 active:scale-95 transition-all flex items-center gap-1"
-                                    title="Nhập thêm hàng"
-                                >
-                                    <span className="material-symbols-rounded text-sm">add</span>
-                                    Nhập thêm
-                                </button>
-                                <button
-                                    onClick={async () => {
-                                        const hasOrders = orders.some(o => o.productId === p.id);
-                                        const ok = window.confirm(hasOrders ? 'Sản phẩm đã có đơn hàng. Xoá vẫn giữ lịch sử đơn. Bạn chắc chắn xoá?' : 'Xoá sản phẩm này khỏi kho?');
-                                        if (!ok) return;
-                                        try {
-                                            await supabaseService.deleteShopProduct(p.id);
-                                            setProducts(prev => prev.filter(x => x.id !== p.id));
-                                            alert('Đã xoá sản phẩm');
-                                        } catch (error) {
-                                            console.error('Error deleting product:', error);
-                                            alert('Lỗi khi xoá sản phẩm');
-                                        }
-                                    }}
-                                    className="px-3 py-1.5 text-xs font-bold rounded-lg bg-rose-50 text-rose-600 border border-rose-200 active:scale-95 transition-all flex items-center gap-1"
-                                    title="Xoá sản phẩm"
-                                >
-                                    <span className="material-symbols-rounded text-sm">delete</span>
-                                    Xoá
-                                </button>
-                            </div>
-                        </div>
-                    ))
+                        );
+                    })
                   )}
               </div>
+
+              {editingProduct && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+                      <div className="w-full max-w-md bg-white rounded-[24px] border border-slate-100 shadow-xl p-5">
+                          <div className="flex items-center justify-between mb-4">
+                              <div className="font-bold text-slate-800">Chỉnh sửa sản phẩm</div>
+                              <button
+                                  onClick={() => setEditingProduct(null)}
+                                  className="w-9 h-9 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center active:scale-95"
+                                  title="Đóng"
+                              >
+                                  <span className="material-symbols-rounded text-slate-600">close</span>
+                              </button>
+                          </div>
+                          <div className="space-y-3">
+                              <input
+                                  value={editProdForm.name}
+                                  onChange={e => setEditProdForm({ ...editProdForm, name: e.target.value })}
+                                  placeholder="Tên sản phẩm"
+                                  className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500"
+                              />
+                              <div className="grid grid-cols-2 gap-3">
+                                  <input
+                                      value={editProdForm.originalPrice}
+                                      onChange={e => setEditProdForm({ ...editProdForm, originalPrice: formatNumberInput(e.target.value) })}
+                                      placeholder="Giá gốc"
+                                      className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500"
+                                  />
+                                  <input
+                                      value={editProdForm.sellingPrice}
+                                      onChange={e => setEditProdForm({ ...editProdForm, sellingPrice: formatNumberInput(e.target.value) })}
+                                      placeholder="Giá bán"
+                                      className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500"
+                                  />
+                              </div>
+                              <div className="grid grid-cols-2 gap-3 mt-2">
+                                  <button
+                                      onClick={() => setEditingProduct(null)}
+                                      className="w-full py-3 bg-slate-100 text-slate-700 font-bold rounded-xl border border-slate-200 active:scale-95 transition-all"
+                                  >
+                                      Huỷ
+                                  </button>
+                                  <button
+                                      onClick={async () => {
+                                          if (!editingProduct) return;
+                                          if (!editProdForm.name || !editProdForm.originalPrice || !editProdForm.sellingPrice) {
+                                              alert('Vui lòng nhập đủ thông tin');
+                                              return;
+                                          }
+                                          try {
+                                              const updates = {
+                                                  name: editProdForm.name,
+                                                  originalPrice: parseSmartAmount(editProdForm.originalPrice),
+                                                  sellingPrice: parseSmartAmount(editProdForm.sellingPrice)
+                                              };
+                                              await supabaseService.updateShopProduct(editingProduct.id, updates);
+                                              setProducts(prev => prev.map(x => x.id === editingProduct.id ? { ...x, ...updates } : x));
+                                              setEditingProduct(null);
+                                              alert('Đã cập nhật sản phẩm');
+                                          } catch (e) {
+                                              console.error('Update product error', e);
+                                              alert('Lỗi khi cập nhật sản phẩm');
+                                          }
+                                      }}
+                                      className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-md shadow-indigo-200 active:scale-95 transition-all"
+                                  >
+                                      Lưu
+                                  </button>
+                              </div>
+                          </div>
+                      </div>
+                  </div>
+              )}
               
               <div className="space-y-3">
                   <div className="flex items-center justify-between px-1">
@@ -1356,11 +1535,17 @@ export default function App() {
       
       const isShopee = ordForm.channel === 'Shopee';
       const selectedLines = ordItems.filter(i => i.productId);
+      const getLineUnitPrice = (p: any | undefined, it: any) => {
+          const base = p ? Number(p.sellingPrice) || 0 : 0;
+          if (!isShopee) return base;
+          const override = parseSmartAmount(it.price || '') || 0;
+          if (override > 0) return override;
+          return base * 1.3;
+      };
       const detailPreview = selectedLines.map(i => {
           const p = products.find(pp => pp.id === i.productId);
           const q = parseInt(i.qty) || 1;
-          let price = p ? p.sellingPrice : 0;
-          if (isShopee) price = price * 1.3;
+          const price = getLineUnitPrice(p, i);
           return { p, q, price, total: q * price, productId: i.productId };
       });
       const totalOrder = detailPreview.reduce((s, d) => s + d.total, 0);
@@ -1373,7 +1558,7 @@ export default function App() {
       const paymentFee = isShopee ? (parseSmartAmount(ordForm.paymentFee) || 0) : 0;
       const shipping = parseSmartAmount(ordForm.shipping) || 0;
       const deposit = parseSmartAmount(ordForm.deposit) || 0;
-      const netRevenue = totalOrder - fixedFee - serviceFee - vat - pit - paymentFee;
+      const netRevenue = totalOrder - (isShopee ? voucher : 0) - fixedFee - serviceFee - vat - pit - paymentFee;
 
       // (Đã hợp nhất tạo đơn sang nhiều sản phẩm; không còn handleCreateOrder đơn lẻ)
 
@@ -1427,7 +1612,11 @@ export default function App() {
                               <label className="text-xs font-bold text-slate-500 mb-1.5 block">Kênh bán hàng</label>
                               <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
                                   {['Shopee', 'Facebook', 'Instagram', 'Zalo'].map(c => (
-                                      <button key={c} onClick={() => setOrdForm({...ordForm, channel: c})} className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${ordForm.channel === c ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' : 'bg-slate-50 text-slate-600 border border-slate-200'}`}>
+                                      <button key={c} onClick={() => setOrdForm({
+                                          ...ordForm,
+                                          channel: c,
+                                          ...(c === 'Shopee' ? { deposit: '', phone: '', address: '' } : {})
+                                      })} className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all ${ordForm.channel === c ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200' : 'bg-slate-50 text-slate-600 border border-slate-200'}`}>
                                           {c}
                                       </button>
                                   ))}
@@ -1436,96 +1625,58 @@ export default function App() {
 
                           <div className="space-y-3">
                               <input type="text" placeholder="Tên khách hàng" value={ordForm.name} onChange={e => setOrdForm({...ordForm, name: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
-                              <div className="grid grid-cols-2 gap-3">
-                                  <input type="tel" placeholder="Số điện thoại" value={ordForm.phone} onChange={e => setOrdForm({...ordForm, phone: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
-                                  <input type="text" placeholder="Tiền cọc" value={ordForm.deposit} onChange={e => setOrdForm({...ordForm, deposit: formatNumberInput(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
-                              </div>
-                              <input type="text" placeholder="Địa chỉ giao hàng" value={ordForm.address} onChange={e => setOrdForm({...ordForm, address: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
-                          </div>
-
-                          <div className="p-4 bg-white rounded-2xl border border-slate-200 shadow-sm">
-                              <div className="flex items-center justify-between mb-4">
-                                  <div className="flex items-center gap-2">
-                                      <div className="w-8 h-8 rounded-full bg-indigo-50 flex items-center justify-center text-indigo-600">
-                                          <span className="material-symbols-rounded text-sm">inventory_2</span>
-                                      </div>
-                                      <h3 className="font-bold text-slate-800">Sản phẩm đơn hàng</h3>
-                                  </div>
-                                  <button onClick={() => setOrdItems([...ordItems, { productId: '', qty: '1' }])} className="text-xs font-bold px-3 py-1.5 rounded-lg bg-indigo-600 text-white shadow-sm shadow-indigo-200 active:scale-95 transition-all flex items-center gap-1">
-                                      <span className="material-symbols-rounded text-sm">add</span>
-                                      Thêm SP
-                                  </button>
-                              </div>
-                              
-                              <div className="space-y-3">
-                                  {ordItems.map((it, idx) => {
-                                      const selectedProd = products.find(p => p.id === it.productId);
-                                      const price = selectedProd ? (isShopee ? selectedProd.sellingPrice * 1.3 : selectedProd.sellingPrice) : 0;
-                                      const qty = parseInt(it.qty) || 0;
-                                      const lineTotal = price * qty;
-                                      
-                                      return (
-                                          <div key={idx} className="p-3 rounded-xl border border-slate-100 bg-slate-50 relative group transition-all hover:border-indigo-200 hover:shadow-sm">
-                                              {ordItems.length > 1 && (
-                                                  <button 
-                                                      onClick={() => setOrdItems(ordItems.filter((_,i)=>i!==idx))} 
-                                                      className="absolute -top-2 -right-2 w-6 h-6 bg-white border border-rose-200 text-rose-500 rounded-full flex items-center justify-center shadow-sm hover:bg-rose-50 hover:text-rose-600 transition-colors z-10"
-                                                      title="Xoá sản phẩm này"
-                                                  >
-                                                      <span className="material-symbols-rounded text-[14px]">close</span>
-                                                  </button>
-                                              )}
-                                              
-                                              <div className="grid grid-cols-[1fr_80px] gap-3 items-start">
-                                                  <div className="space-y-2">
-                                                      <select 
-                                                          value={it.productId} 
-                                                          onChange={e => setOrdItems(ordItems.map((x,i)=> i===idx ? {...x, productId: e.target.value} : x))} 
-                                                          className="w-full bg-white border border-slate-200 px-3 py-2 rounded-lg text-sm outline-none focus:border-indigo-500 font-medium text-slate-700"
-                                                      >
-                                                          <option value="">-- Chọn sản phẩm --</option>
-                                                          {activeProducts.map(p => (
-                                                              <option key={p.id} value={p.id}>{p.name} (Kho: {p.stock})</option>
-                                                          ))}
-                                                      </select>
-                                                      {selectedProd && (
-                                                          <div className="text-[11px] text-slate-500 flex items-center gap-2 px-1">
-                                                              <span>Đơn giá: <strong className="text-slate-700">{formatCurrency(price)}</strong></span>
-                                                              <span>•</span>
-                                                              <span>Tồn kho: <strong className={selectedProd.stock < qty ? 'text-rose-600' : 'text-emerald-600'}>{selectedProd.stock}</strong></span>
-                                                          </div>
-                                                      )}
-                                                  </div>
-                                                  
-                                                  <div className="space-y-2">
-                                                      <div className="flex items-center bg-white border border-slate-200 rounded-lg overflow-hidden">
-                                                          <input 
-                                                              type="number" 
-                                                              min="1" 
-                                                              value={it.qty} 
-                                                              onChange={e => setOrdItems(ordItems.map((x,i)=> i===idx ? {...x, qty: e.target.value} : x))} 
-                                                              className="w-full px-2 py-2 text-sm outline-none text-center font-bold text-slate-700" 
-                                                              placeholder="SL"
-                                                          />
-                                                      </div>
-                                                      {selectedProd && (
-                                                          <div className="text-[11px] font-bold text-indigo-600 text-right px-1">
-                                                              {formatCurrency(lineTotal)}
-                                                          </div>
-                                                      )}
-                                                  </div>
-                                              </div>
-                                          </div>
-                                      );
-                                  })}
-                              </div>
-                              
-                              {detailPreview.length > 0 && (
-                                  <div className="mt-4 pt-4 border-t border-slate-200 flex justify-between items-center">
-                                      <span className="text-sm font-medium text-slate-500">Tổng tiền hàng ({detailPreview.reduce((s, d) => s + d.q, 0)} SP)</span>
-                                      <span className="text-lg font-bold text-slate-800">{formatCurrency(totalOrder)}</span>
+                              {!isShopee && (
+                                  <div className="grid grid-cols-2 gap-3">
+                                      <input type="tel" placeholder="Số điện thoại" value={ordForm.phone} onChange={e => setOrdForm({...ordForm, phone: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
+                                      <input type="text" placeholder="Tiền cọc" value={ordForm.deposit} onChange={e => setOrdForm({...ordForm, deposit: formatNumberInput(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
                                   </div>
                               )}
+                              {!isShopee && (
+                                  <input type="text" placeholder="Địa chỉ giao hàng" value={ordForm.address} onChange={e => setOrdForm({...ordForm, address: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500" />
+                              )}
+                          </div>
+
+                          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200">
+                              <div className="flex items-center justify-between mb-3">
+                                  <label className="text-xs font-bold text-slate-500 uppercase">Sản phẩm</label>
+                                  <button onClick={() => setOrdItems([...ordItems, { productId: '', qty: '1', price: '' }])} className="text-xs font-bold px-3 py-1.5 rounded-xl bg-white text-indigo-600 border border-indigo-200 active:scale-95 transition-all">+ Thêm dòng</button>
+                              </div>
+                              <div className="space-y-2">
+                                  {ordItems.map((it, idx) => (
+                                      <div key={idx} className="bg-white p-3 rounded-xl border border-slate-200">
+                                          <select value={it.productId} onChange={e => {
+                                              const nextProductId = e.target.value;
+                                              setOrdItems(ordItems.map((x,i)=> {
+                                                  if (i !== idx) return x;
+                                                  const prod = products.find(pp => pp.id === nextProductId);
+                                                  const next: any = { ...x, productId: nextProductId };
+                                                  if (isShopee && (!x.price || x.price === '') && prod) {
+                                                      next.price = formatNumberInput(String((Number(prod.sellingPrice) || 0) * 1.3));
+                                                  }
+                                                  return next;
+                                              }));
+                                          }} className="w-full bg-white border border-slate-200 px-3 py-3 rounded-xl text-sm outline-none">
+                                              <option value="">Chọn sản phẩm</option>
+                                              {activeProducts.map(p => (
+                                                  <option key={p.id} value={p.id}>{p.name} (Kho: {p.stock})</option>
+                                              ))}
+                                          </select>
+                                          <div className="flex gap-2 items-center mt-2">
+                                              <input type="number" min="1" value={it.qty} onChange={e => setOrdItems(ordItems.map((x,i)=> i===idx ? {...x, qty: e.target.value} : x))} className="w-20 bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl text-sm outline-none text-center font-bold" />
+                                              {isShopee && (
+                                                  <input
+                                                      type="text"
+                                                      placeholder="Giá"
+                                                      value={it.price || ''}
+                                                      onChange={e => setOrdItems(ordItems.map((x,i)=> i===idx ? { ...x, price: formatNumberInput(e.target.value) } : x))}
+                                                      className="flex-1 min-w-[120px] bg-slate-50 border border-slate-200 px-3 py-2.5 rounded-xl text-sm outline-none text-right font-bold"
+                                                  />
+                                              )}
+                                              <button onClick={() => setOrdItems(ordItems.filter((_,i)=>i!==idx))} className="px-3 py-2.5 rounded-xl bg-rose-50 text-rose-600 border border-rose-200 active:scale-95 font-bold text-sm">Xoá</button>
+                                          </div>
+                                      </div>
+                                  ))}
+                              </div>
                           </div>
 
                           <div className="space-y-3">
@@ -1534,7 +1685,7 @@ export default function App() {
                               {isShopee && (
                                   <div className="p-4 bg-orange-50 rounded-xl border border-orange-100 space-y-3">
                                       <h4 className="text-xs font-bold text-orange-600 uppercase">Phí Shopee</h4>
-                                      <input type="text" placeholder="Trợ giá Voucher (trừ vào net)" value={ordForm.voucher} onChange={e => setOrdForm({...ordForm, voucher: formatNumberInput(e.target.value)})} className="w-full bg-white border border-orange-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-orange-500" />
+                                      <input type="text" placeholder="Trợ giá Voucher (trừ thẳng vào doanh thu)" value={ordForm.voucher} onChange={e => setOrdForm({...ordForm, voucher: formatNumberInput(e.target.value)})} className="w-full bg-white border border-orange-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-orange-500" />
                                       <input type="text" placeholder="Phí thanh toán (tự nhập)" value={ordForm.paymentFee} onChange={e => setOrdForm({...ordForm, paymentFee: formatNumberInput(e.target.value)})} className="w-full bg-white border border-orange-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-orange-500" />
                                       
                                       <div className="text-xs text-orange-700 space-y-1 mt-2 bg-white p-3 rounded-lg border border-orange-100">
@@ -1557,6 +1708,10 @@ export default function App() {
 
                           <div className="grid grid-cols-1 gap-2">
                               <button onClick={async () => {
+                                  if (!ordForm.name) {
+                                      alert('Vui lòng nhập tên khách hàng');
+                                      return;
+                                  }
                                   if (ordItems.every(i => !i.productId)) {
                                       alert('Vui lòng thêm ít nhất 1 sản phẩm trong danh sách nhiều sản phẩm');
                                       return;
@@ -1565,8 +1720,11 @@ export default function App() {
                                   const detail = ordItems.filter(i=>i.productId).map(i => {
                                       const p = products.find(pp => pp.id === i.productId);
                                       const q = parseInt(i.qty) || 1;
-                                      let price = p ? p.sellingPrice : 0;
-                                      if (isShopeeLocal) price = price * 1.3;
+                                      let price = p ? Number(p.sellingPrice) || 0 : 0;
+                                      if (isShopeeLocal) {
+                                          const override = parseSmartAmount(i.price || '') || 0;
+                                          price = override > 0 ? override : price * 1.3;
+                                      }
                                       return { p, q, price, total: q * price, productId: i.productId };
                                   });
                                   if (detail.length === 0) {
@@ -1585,17 +1743,17 @@ export default function App() {
                                   const vatLocal = isShopeeLocal ? baseForFeeLocal * 0.01 : 0;
                                   const pitLocal = isShopeeLocal ? baseForFeeLocal * 0.005 : 0;
                                   const paymentFeeLocal = isShopeeLocal ? (parseSmartAmount(ordForm.paymentFee) || 0) : 0;
-                                  const netLocal = total - fixedFeeLocal - serviceFeeLocal - vatLocal - pitLocal - paymentFeeLocal;
+                                  const netLocal = total - (isShopeeLocal ? voucherLocal : 0) - fixedFeeLocal - serviceFeeLocal - vatLocal - pitLocal - paymentFeeLocal;
                                   const newOrder = {
                                       id: Date.now().toString(),
                                       shopId: activeShop,
                                       channel: ordForm.channel,
                                       name: ordForm.name,
-                                      phone: ordForm.phone,
-                                      address: ordForm.address,
-                                      productId: JSON.stringify(ordItems.map(i => ({ productId: i.productId, qty: parseInt(i.qty)||1 }))),
+                                      phone: isShopeeLocal ? '' : ordForm.phone,
+                                      address: isShopeeLocal ? '' : ordForm.address,
+                                      productId: JSON.stringify(detail.map(d => ({ productId: d.productId, qty: d.q, unitPrice: d.price }))),
                                       qty: detail.reduce((s,d)=>s+d.q,0),
-                                      deposit: parseSmartAmount(ordForm.deposit) || 0,
+                                      deposit: isShopeeLocal ? 0 : (parseSmartAmount(ordForm.deposit) || 0),
                                       shipping: parseSmartAmount(ordForm.shipping) || 0,
                                       voucher: parseSmartAmount(ordForm.voucher) || 0,
                                       paymentFee: parseSmartAmount(ordForm.paymentFee) || 0,
@@ -1632,7 +1790,7 @@ export default function App() {
                                       }));
                                       alert('Tạo đơn nhiều sản phẩm thành công!');
                                       setOrdForm({ channel: 'Shopee', name: '', phone: '', address: '', productId: '', qty: '1', deposit: '', shipping: '', voucher: '', paymentFee: '', status: 'Chưa Gửi Hàng', paymentMethod: 'Đang Thanh Toán' });
-                                      setOrdItems([{ productId: '', qty: '1' }]);
+                                      setOrdItems([{ productId: '', qty: '1', price: '' }, { productId: '', qty: '1', price: '' }]);
                                       setOrderTab('list');
                                   } catch (error) {
                                       console.error('Error creating multi order:', error);
@@ -1711,78 +1869,45 @@ export default function App() {
                                           </select>
                                       </div>
                                   {expandedOrders.includes(o.id) && (
-                                      <div className="mt-4 pt-4 border-t border-slate-100">
-                                          <div className="bg-slate-50 rounded-xl p-4 space-y-4">
+                                      <div className="mt-3 p-3 bg-slate-50 rounded-lg border border-slate-100 text-xs space-y-2">
+                                          {(() => {
+                                              let items: any[] = [];
+                                              try { const arr = JSON.parse(o.productId); if (Array.isArray(arr)) items = arr; } catch(e){}
+                                              if (items.length === 0) items = [{ productId: o.productId, qty: o.qty }];
+                                              const isShopeeLocal = o.channel === 'Shopee';
+                                              const rows = items.map((it, idx) => {
+                                                  const prod = products.find(p => p.id === it.productId);
+                                                  const name = prod?.name || 'Sản phẩm';
+                                                  const unit = prod ? prod.sellingPrice : 0;
+                                                  const savedUnitPrice = Number(it.unitPrice) || 0;
+                                                  const price = savedUnitPrice > 0 ? savedUnitPrice : (isShopeeLocal ? unit * 1.3 : unit);
+                                                  const qty = parseInt(it.qty) || 1;
+                                                  const line = qty * price;
+                                                  return (
+                                                      <div key={idx} className="grid grid-cols-[1fr_48px_100px] gap-2 py-1">
+                                                          <div className="font-medium text-slate-700">{name}</div>
+                                                          <div className="text-right">x{qty}</div>
+                                                          <div className="text-right font-bold">{formatCurrency(line)}</div>
+                                                      </div>
+                                                  );
+                                              });
+                                              return <div>{rows}</div>;
+                                          })()}
+                                          <div className="pt-2 border-t border-slate-200 grid grid-cols-2 gap-2">
                                               <div>
-                                                  <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Sản phẩm</h4>
-                                                  <div className="space-y-2">
-                                                      {(() => {
-                                                          let items: any[] = [];
-                                                          try { const arr = JSON.parse(o.productId); if (Array.isArray(arr)) items = arr; } catch(e){}
-                                                          if (items.length === 0) items = [{ productId: o.productId, qty: o.qty }];
-                                                          const isShopeeLocal = o.channel === 'Shopee';
-                                                          let subtotal = 0;
-                                                          const productRows = items.map((it, idx) => {
-                                                              const prod = products.find(p => p.id === it.productId);
-                                                              const name = prod?.name || 'Sản phẩm';
-                                                              const unit = prod ? prod.sellingPrice : 0;
-                                                              const price = isShopeeLocal ? unit * 1.3 : unit;
-                                                              const qty = parseInt(it.qty) || 1;
-                                                              const line = qty * price;
-                                                              subtotal += line;
-                                                              return (
-                                                                  <div key={idx} className="flex justify-between items-center bg-white p-3 rounded-lg border border-slate-100 shadow-sm">
-                                                                      <div className="flex-1">
-                                                                          <div className="font-medium text-sm text-slate-800">{name}</div>
-                                                                          <div className="text-xs text-slate-500 mt-0.5">{formatCurrency(price)} x {qty}</div>
-                                                                      </div>
-                                                                      <div className="font-bold text-sm text-slate-800">{formatCurrency(line)}</div>
-                                                                  </div>
-                                                              );
-                                                          });
-                                                          
-                                                          const totalToPay = subtotal - (o.voucher || 0) + (o.shipping || 0);
-                                                          const remainingToPay = totalToPay - (o.deposit || 0);
-
-                                                          return (
-                                                              <>
-                                                                  {productRows}
-                                                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
-                                                                      <div className="bg-white p-3 rounded-lg border border-slate-100 shadow-sm">
-                                                                          <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Khách hàng</h4>
-                                                                          <div className="space-y-1.5 text-sm">
-                                                                              <div className="flex justify-between"><span className="text-slate-500">Tên:</span> <span className="font-medium text-slate-800">{o.name}</span></div>
-                                                                              <div className="flex justify-between"><span className="text-slate-500">SĐT:</span> <span className="font-medium text-slate-800">{o.phone || '-'}</span></div>
-                                                                              <div className="flex justify-between"><span className="text-slate-500">Địa chỉ:</span> <span className="font-medium text-slate-800 text-right max-w-[150px] truncate" title={o.address || '-'}>{o.address || '-'}</span></div>
-                                                                          </div>
-                                                                      </div>
-                                                                      <div className="bg-white p-3 rounded-lg border border-slate-100 shadow-sm">
-                                                                          <h4 className="text-xs font-bold text-slate-500 uppercase mb-2">Thanh toán</h4>
-                                                                          <div className="space-y-1.5 text-sm">
-                                                                              <div className="flex justify-between"><span className="text-slate-500">Tạm tính:</span> <span className="font-medium text-slate-800">{formatCurrency(subtotal)}</span></div>
-                                                                              <div className="flex justify-between"><span className="text-slate-500">Voucher:</span> <span className="font-medium text-rose-600">-{formatCurrency(o.voucher || 0)}</span></div>
-                                                                              <div className="flex justify-between"><span className="text-slate-500">Vận chuyển:</span> <span className="font-medium text-slate-800">{formatCurrency(o.shipping || 0)}</span></div>
-                                                                              <div className="pt-2 mt-2 border-t border-slate-100 flex justify-between items-center">
-                                                                                  <span className="font-bold text-slate-800">Khách cần trả:</span>
-                                                                                  <span className="font-bold text-indigo-600">{formatCurrency(totalToPay)}</span>
-                                                                              </div>
-                                                                              {(o.deposit || 0) > 0 && (
-                                                                                  <>
-                                                                                      <div className="flex justify-between"><span className="text-slate-500">Đã đặt cọc:</span> <span className="font-medium text-rose-600">-{formatCurrency(o.deposit || 0)}</span></div>
-                                                                                      <div className="flex justify-between"><span className="text-slate-500">Còn lại:</span> <span className="font-medium text-rose-600">{formatCurrency(remainingToPay)}</span></div>
-                                                                                  </>
-                                                                              )}
-                                                                              <div className="pt-2 mt-2 border-t border-slate-100 flex justify-between items-center">
-                                                                                  <span className="font-bold text-slate-800">Thực thu (Net):</span>
-                                                                                  <span className="font-bold text-lg text-emerald-600">{formatCurrency(o.netRevenue)}</span>
-                                                                              </div>
-                                                                          </div>
-                                                                      </div>
-                                                                  </div>
-                                                              </>
-                                                          );
-                                                      })()}
-                                                  </div>
+                                                  <div className="font-bold text-slate-700 mb-1">Khách hàng</div>
+                                                  <div className="text-[11px] text-slate-600">Tên: {o.name}</div>
+                                                  <div className="text-[11px] text-slate-600">SĐT: {o.phone || '-'}</div>
+                                                  <div className="text-[11px] text-slate-600">Địa chỉ: {o.address || '-'}</div>
+                                              </div>
+                                              <div className="text-right space-y-0.5">
+                                                  <div>Voucher: <span className="font-bold">-{formatCurrency(o.voucher || 0)}</span></div>
+                                                  <div>Vận chuyển: <span className="font-bold">{formatCurrency(o.shipping || 0)}</span></div>
+                                                  <div>Phí thanh toán: <span className="font-bold">-{formatCurrency(o.paymentFee || 0)}</span></div>
+                                                  {o.channel !== 'Shopee' && (o.deposit || 0) > 0 && (
+                                                      <div>Đặt cọc: <span className="font-bold">-{formatCurrency(o.deposit || 0)}</span></div>
+                                                  )}
+                                                  <div className="border-t border-slate-200 pt-1 font-bold">Khách trả (Net): <span className="text-emerald-600">{formatCurrency(o.netRevenue)}</span></div>
                                               </div>
                                           </div>
                                       </div>
@@ -1840,178 +1965,93 @@ export default function App() {
                                               container.style.position = 'fixed';
                                               container.style.left = '-9999px';
                                               container.style.top = '0';
-                                              container.style.width = '800px';
+                                              container.style.width = '720px';
                                               container.style.background = '#fff';
-                                              container.style.padding = '40px';
-                                              container.style.fontFamily = '"Times New Roman", Times, serif';
-                                              container.style.color = '#000';
-
-                                              const readNumber = (num: number) => {
-                                                  if (num === 0) return 'Không đồng';
-                                                  const units = ['', 'một', 'hai', 'ba', 'bốn', 'năm', 'sáu', 'bảy', 'tám', 'chín'];
-                                                  const placeValues = ['', 'nghìn', 'triệu', 'tỷ'];
-                                                  let str = Math.abs(num).toString();
-                                                  let result = '';
-                                                  let groups = [];
-                                                  while (str.length > 0) {
-                                                      groups.push(str.slice(-3));
-                                                      str = str.slice(0, -3);
-                                                  }
-                                                  for (let i = 0; i < groups.length; i++) {
-                                                      if (parseInt(groups[i]) === 0) continue;
-                                                      let groupStr = '';
-                                                      let g = groups[i].padStart(3, '0');
-                                                      let h = parseInt(g[0]), t = parseInt(g[1]), u = parseInt(g[2]);
-                                                      if (h > 0 || i < groups.length - 1) groupStr += units[h] + ' trăm ';
-                                                      if (t === 0 && u > 0 && (h > 0 || i < groups.length - 1)) groupStr += 'lẻ ';
-                                                      else if (t === 1) groupStr += 'mười ';
-                                                      else if (t > 1) groupStr += units[t] + ' mươi ';
-                                                      if (u === 1 && t > 1) groupStr += 'mốt ';
-                                                      else if (u === 5 && t > 0) groupStr += 'lăm ';
-                                                      else if (u > 0) groupStr += units[u] + ' ';
-                                                      result = groupStr + placeValues[i] + ' ' + result;
-                                                  }
-                                                  result = result.trim().replace(/\s+/g, ' ');
-                                                  return result.charAt(0).toUpperCase() + result.slice(1) + ' đồng chẵn';
-                                              };
-
-                                              const d = new Date(o.date);
-                                              const dateStr = `Ngày ${d.getDate().toString().padStart(2, '0')} tháng ${(d.getMonth() + 1).toString().padStart(2, '0')} năm ${d.getFullYear()}`;
-
+                                              container.style.padding = '24px';
+                                              container.style.fontFamily = 'ui-sans-serif, system-ui';
+                                              const header = document.createElement('div');
+                                              header.style.display = 'flex';
+                                              header.style.justifyContent = 'space-between';
+                                              header.style.alignItems = 'center';
+                                              const seller = document.createElement('div');
+                                              const sTitle = document.createElement('div'); sTitle.textContent = 'ELANK STUDIO'; sTitle.style.fontSize = '18px'; sTitle.style.fontWeight = '800';
+                                              const sAddr = document.createElement('div'); sAddr.textContent = 'Địa chỉ: .................'; sAddr.style.fontSize = '12px'; sAddr.style.color = '#334155';
+                                              const sPhone = document.createElement('div'); sPhone.textContent = 'Điện thoại: .............'; sPhone.style.fontSize = '12px'; sPhone.style.color = '#334155';
+                                              seller.appendChild(sTitle); seller.appendChild(sAddr); seller.appendChild(sPhone);
+                                              const doc = document.createElement('div');
+                                              const dTitle = document.createElement('div'); dTitle.textContent = 'HOÁ ĐƠN BÁN LẺ'; dTitle.style.fontSize = '20px'; dTitle.style.fontWeight = '800';
+                                              const dInfo = document.createElement('div'); dInfo.textContent = `Số: ${o.id} • Ngày: ${new Date(o.date).toLocaleDateString('vi-VN')}`; dInfo.style.fontSize = '12px'; dInfo.style.color = '#64748b';
+                                              doc.appendChild(dTitle); doc.appendChild(dInfo);
+                                              header.appendChild(seller); header.appendChild(doc);
+                                              const buyer = document.createElement('div');
+                                              buyer.style.marginTop = '12px';
+                                              buyer.style.fontSize = '12px';
+                                              buyer.style.color = '#0f172a';
+                                              buyer.innerHTML = `<div>Khách hàng: <strong>${o.name}</strong></div>
+                                              <div>SĐT: ${o.phone || '-'}</div>
+                                              <div>Địa chỉ: ${o.address || '-'}</div>`;
+                                              const table = document.createElement('table');
+                                              table.style.width = '100%';
+                                              table.style.marginTop = '12px';
+                                              table.style.borderCollapse = 'collapse';
+                                              const thead = document.createElement('thead');
+                                              thead.innerHTML = '<tr><th style="border:1px solid #e2e8f0;padding:6px;text-align:left;font-size:12px">STT</th><th style="border:1px solid #e2e8f0;padding:6px;text-align:left;font-size:12px">Sản phẩm</th><th style="border:1px solid #e2e8f0;padding:6px;text-align:right;font-size:12px">SL</th><th style="border:1px solid #e2e8f0;padding:6px;text-align:right;font-size:12px">Đơn giá</th><th style="border:1px solid #e2e8f0;padding:6px;text-align:right;font-size:12px">Thành tiền</th></tr>';
+                                              const tbody = document.createElement('tbody');
                                               let items:any[] = [];
                                               try { const arr = JSON.parse(o.productId); if (Array.isArray(arr)) items = arr; } catch(e){}
                                               if (items.length === 0) items = [{ productId: o.productId, qty: o.qty }];
-                                              
                                               let subtotal = 0;
-                                              const rowsHtml = items.map((it, idx) => {
+                                              items.forEach((it, idx) => {
                                                   const prod = products.find(p => p.id === it.productId);
                                                   const unit = prod ? prod.sellingPrice : 0;
-                                                  const price = o.channel === 'Shopee' ? unit * 1.3 : unit;
+                                                  const savedUnitPrice = Number(it.unitPrice) || 0;
+                                                  const price = savedUnitPrice > 0 ? savedUnitPrice : (o.channel === 'Shopee' ? unit * 1.3 : unit);
                                                   const q = parseInt(it.qty) || 1;
                                                   const line = price * q;
                                                   subtotal += line;
-                                                  return `
-                                                  <tr>
-                                                      <td style="border: 1px solid #000; padding: 8px; text-align: center;">${idx + 1}</td>
-                                                      <td style="border: 1px solid #000; padding: 8px;">${prod?.name || 'Sản phẩm'}</td>
-                                                      <td style="border: 1px solid #000; padding: 8px; text-align: center;">Bộ</td>
-                                                      <td style="border: 1px solid #000; padding: 8px; text-align: center;">${q}</td>
-                                                      <td style="border: 1px solid #000; padding: 8px; text-align: right;">${new Intl.NumberFormat('vi-VN').format(price)}</td>
-                                                      <td style="border: 1px solid #000; padding: 8px; text-align: right;">${new Intl.NumberFormat('vi-VN').format(line)}</td>
-                                                  </tr>
-                                                  `;
-                                              }).join('');
-
+                                                  const tr = document.createElement('tr');
+                                                  tr.innerHTML = `<td style="border:1px solid #e2e8f0;padding:6px;font-size:12px">${idx+1}</td>
+                                                  <td style="border:1px solid #e2e8f0;padding:6px;font-size:12px">${prod?.name || 'Sản phẩm'}</td>
+                                                  <td style="border:1px solid #e2e8f0;padding:6px;text-align:right;font-size:12px">${q}</td>
+                                                  <td style="border:1px solid #e2e8f0;padding:6px;text-align:right;font-size:12px">${new Intl.NumberFormat('vi-VN').format(price)}</td>
+                                                  <td style="border:1px solid #e2e8f0;padding:6px;text-align:right;font-size:12px">${new Intl.NumberFormat('vi-VN').format(line)}</td>`;
+                                                  tbody.appendChild(tr);
+                                              });
+                                              table.appendChild(thead); table.appendChild(tbody);
+                                              const sum = document.createElement('div');
+                                              sum.style.marginTop = '12px';
+                                              sum.style.fontSize = '12px';
                                               const voucher = o.voucher || 0;
+                                              const baseForFee = Math.max(0, subtotal - voucher);
+                                              const fixedFee = o.channel === 'Shopee' ? baseForFee * 0.14 : 0;
+                                              const serviceFee = o.channel === 'Shopee' ? 3000 : 0;
+                                              const vat = o.channel === 'Shopee' ? baseForFee * 0.01 : 0;
+                                              const pit = o.channel === 'Shopee' ? baseForFee * 0.005 : 0;
+                                              const paymentFee = o.channel === 'Shopee' ? (o.paymentFee || 0) : 0;
                                               const shipping = o.shipping || 0;
-                                              const deposit = o.deposit || 0;
-                                              const totalToPay = subtotal - voucher + shipping - deposit;
-
-                                              container.innerHTML = `
-                                                  <div style="text-align: center; margin-bottom: 20px;">
-                                                      <h1 style="margin: 0; font-size: 24px; text-transform: uppercase;">HÓA ĐƠN BÁN HÀNG</h1>
-                                                      <p style="margin: 5px 0 0 0; font-size: 14px;">${dateStr}</p>
+                                              const net = o.netRevenue;
+                                              sum.innerHTML = `<div style="display:flex;justify-content:flex-end">
+                                                  <div style="width:420px">
+                                                    <div style="display:flex;justify-content:space-between"><span>Tạm tính</span><strong>${new Intl.NumberFormat('vi-VN').format(subtotal)}</strong></div>
+                                                    <div style="display:flex;justify-content:space-between"><span>Voucher</span><strong>-${new Intl.NumberFormat('vi-VN').format(voucher)}</strong></div>
+                                                    ${o.channel === 'Shopee' ? `
+                                                    <div style="display:flex;justify-content:space-between"><span>Phí cố định (14%)</span><strong>-${new Intl.NumberFormat('vi-VN').format(fixedFee)}</strong></div>
+                                                    <div style="display:flex;justify-content:space-between"><span>Phí dịch vụ</span><strong>-${new Intl.NumberFormat('vi-VN').format(serviceFee)}</strong></div>
+                                                    <div style="display:flex;justify-content:space-between"><span>Thuế GTGT (1%)</span><strong>-${new Intl.NumberFormat('vi-VN').format(vat)}</strong></div>
+                                                    <div style="display:flex;justify-content:space-between"><span>Thuế TNCN (0.5%)</span><strong>-${new Intl.NumberFormat('vi-VN').format(pit)}</strong></div>
+                                                    <div style="display:flex;justify-content:space-between"><span>Phí thanh toán</span><strong>-${new Intl.NumberFormat('vi-VN').format(paymentFee)}</strong></div>
+                                                    ` : ``}
+                                                    <div style="display:flex;justify-content:space-between"><span>Vận chuyển</span><strong>${new Intl.NumberFormat('vi-VN').format(shipping)}</strong></div>
+                                                    <div style="border-top:1px solid #e2e8f0;margin-top:6px;padding-top:6px;display:flex;justify-content:space-between"><span>Khách trả (Net)</span><strong>${new Intl.NumberFormat('vi-VN').format(net)}</strong></div>
                                                   </div>
-                                                  
-                                                  <div style="display: flex; justify-content: space-between; margin-bottom: 20px; font-size: 14px; line-height: 1.5;">
-                                                      <div>
-                                                          <div>Tên người bán: <strong>ELANK STUDIO</strong></div>
-                                                          <div style="white-space: nowrap;">Địa chỉ: 101 Đ. Tôn Dật Tiên, phường Tân Mỹ, Quận 7, Hồ Chí Minh</div>
-                                                          <div>Điện thoại: 0899.660.847</div>
-                                                          <div style="display: flex; gap: 10px;">
-                                                              <div style="white-space: nowrap;">Số tài khoản:</div>
-                                                              <div style="white-space: nowrap;"><strong>900410028888</strong> &nbsp;&nbsp;TECHCOMBANK NGUYEN DO TUONG VY</div>
-                                                          </div>
-                                                      </div>
-                                                      <div>
-                                                          <img src="https://img.vietqr.io/image/TCB-900410028888-compact2.png?amount=${totalToPay}&addInfo=Thanh toan don hang ${o.id}&accountName=NGUYEN DO TUONG VY" alt="QR Code" style="width: 90px; height: 90px; object-fit: contain;" crossorigin="anonymous" />
-                                                      </div>
-                                                  </div>
-                                                  
-                                                  <div style="margin-bottom: 20px; font-size: 14px; line-height: 1.5;">
-                                                      <div>Tên người mua: <strong>${o.name}</strong></div>
-                                                      <div style="white-space: nowrap;">Địa chỉ: ${o.address || ''}</div>
-                                                      <div>Điện thoại: ${o.phone || ''}</div>
-                                                  </div>
-                                                  
-                                                  <table style="width: 100%; border-collapse: collapse; font-size: 14px; margin-bottom: 0; border: 1px solid #000;">
-                                                      <thead>
-                                                          <tr>
-                                                              <th style="border: 1px solid #000; padding: 8px; text-align: center; white-space: nowrap;">STT</th>
-                                                              <th style="border: 1px solid #000; padding: 8px; text-align: center;">Tên hàng hóa, dịch vụ</th>
-                                                              <th style="border: 1px solid #000; padding: 8px; text-align: center; white-space: nowrap;">Đơn vị<br/>tính</th>
-                                                              <th style="border: 1px solid #000; padding: 8px; text-align: center; white-space: nowrap;">Số lượng</th>
-                                                              <th style="border: 1px solid #000; padding: 8px; text-align: center; white-space: nowrap;">Đơn giá</th>
-                                                              <th style="border: 1px solid #000; padding: 8px; text-align: center; white-space: nowrap;">Thành tiền</th>
-                                                          </tr>
-                                                          <tr>
-                                                              <th style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: normal;">1</th>
-                                                              <th style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: normal;">2</th>
-                                                              <th style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: normal;">3</th>
-                                                              <th style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: normal;">4</th>
-                                                              <th style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: normal;">5</th>
-                                                              <th style="border: 1px solid #000; padding: 4px; text-align: center; font-weight: normal;">6 = 4x5</th>
-                                                          </tr>
-                                                      </thead>
-                                                      <tbody>
-                                                          ${rowsHtml}
-                                                          <tr>
-                                                              <td colspan="5" style="border: 1px solid #000; padding: 8px; text-align: center; font-weight: bold;">TỔNG CỘNG:</td>
-                                                              <td style="border: 1px solid #000; padding: 8px; text-align: right; font-weight: bold; white-space: nowrap;">${new Intl.NumberFormat('vi-VN').format(subtotal)}</td>
-                                                          </tr>
-                                                      </tbody>
-                                                  </table>
-                                                  
-                                                  <div style="display: flex; justify-content: flex-end; font-size: 14px; line-height: 1.5; margin-bottom: 30px; border: 1px solid #000; border-top: none;">
-                                                      <table style="width: 500px; border-collapse: collapse;">
-                                                          <tr>
-                                                              <td style="text-align: right; padding: 4px 8px; white-space: nowrap;">Phí vận chuyển:</td>
-                                                              <td style="text-align: right; padding: 4px 8px; width: 120px; white-space: nowrap;">${new Intl.NumberFormat('vi-VN').format(shipping)}</td>
-                                                          </tr>
-                                                          <tr>
-                                                              <td style="text-align: right; padding: 4px 8px; white-space: nowrap;">Đã thanh toán:</td>
-                                                              <td style="text-align: right; padding: 4px 8px; white-space: nowrap;">${new Intl.NumberFormat('vi-VN').format(deposit)}</td>
-                                                          </tr>
-                                                          <tr>
-                                                              <td style="text-align: right; padding: 4px 8px; white-space: nowrap;">Chiết khấu:</td>
-                                                              <td style="text-align: right; padding: 4px 8px; white-space: nowrap;">${new Intl.NumberFormat('vi-VN').format(voucher)}</td>
-                                                          </tr>
-                                                          <tr>
-                                                              <td style="text-align: right; padding: 4px 8px; font-weight: bold; white-space: nowrap;">TỔNG THANH TOÁN:</td>
-                                                              <td style="text-align: right; padding: 4px 8px; font-weight: bold; font-size: 16px; white-space: nowrap;">${new Intl.NumberFormat('vi-VN').format(totalToPay)}</td>
-                                                          </tr>
-                                                          <tr>
-                                                              <td style="text-align: right; padding: 4px 8px; white-space: nowrap;">Số tiền viết bằng chữ:</td>
-                                                              <td style="text-align: right; padding: 4px 8px; font-style: italic; white-space: nowrap;">${readNumber(totalToPay)}</td>
-                                                          </tr>
-                                                      </table>
-                                                  </div>
-                                                  
-                                                  <div style="display: flex; justify-content: space-between; text-align: center; font-size: 14px; margin-bottom: 20px;">
-                                                      <div style="width: 50%;">
-                                                          <div style="font-weight: bold; margin-bottom: 5px;">NGƯỜI MUA HÀNG</div>
-                                                          <div style="font-style: italic;">(Ký, ghi rõ họ, tên)</div>
-                                                      </div>
-                                                      <div style="width: 50%;">
-                                                          <div style="font-style: italic; margin-bottom: 5px;">${dateStr}</div>
-                                                          <div style="font-weight: bold;">NGƯỜI BÁN HÀNG</div>
-                                                          <div style="margin-top: 40px; font-family: 'Brush Script MT', cursive, sans-serif; font-size: 32px;">Vy</div>
-                                                          <div style="margin-top: 10px; font-weight: bold;">Nguyễn Đỗ Tường Vy</div>
-                                                      </div>
-                                                  </div>
-                                                  
-                                                  <div style="font-size: 12px; line-height: 1.5;">
-                                                      <div>(In tại Công ty in........., Mã số thuế................)</div>
-                                                      <div style="font-weight: bold;">Ghi chú:</div>
-                                                      <div>- Liên 1: Lưu</div>
-                                                      <div>- Liên 2: Giao người mua</div>
-                                                      <div>- Liên 3: Nội bộ</div>
-                                                  </div>
-                                              `;
-
+                                                </div>`;
+                                              container.appendChild(header);
+                                              container.appendChild(buyer);
+                                              container.appendChild(table);
+                                              container.appendChild(sum);
                                               document.body.appendChild(container);
                                               try {
-                                                  const canvas = await html2canvas(container, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
+                                                  const canvas = await html2canvas(container, { scale: 2, backgroundColor: '#ffffff' });
                                                   const link = document.createElement('a');
                                                   link.download = `Hoa-don-${o.name}-${new Date(o.date).toLocaleDateString('vi-VN').replace(/\//g,'-')}.png`;
                                                   link.href = canvas.toDataURL('image/png');
@@ -2171,7 +2211,6 @@ export default function App() {
 
   const renderShop = () => {
       const shops = [
-          { id: 'eclat', name: 'Éclat Royal', icon: 'diamond' },
           { id: 'elank', name: 'Elank Studio', icon: 'palette' }
       ];
 
@@ -2183,7 +2222,7 @@ export default function App() {
                   <div className="relative">
                       <select 
                           value={activeShop}
-                          onChange={(e) => setActiveShop(e.target.value as 'eclat' | 'elank')}
+                          onChange={(e) => setActiveShop(e.target.value)}
                           className="appearance-none bg-white border border-slate-200 text-slate-700 py-2 pl-4 pr-10 rounded-xl font-bold text-sm outline-none shadow-sm focus:border-indigo-500 cursor-pointer"
                       >
                           {shops.map(s => (
