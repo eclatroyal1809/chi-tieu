@@ -31,7 +31,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [configError, setConfigError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'home' | 'history' | 'shop'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'history' | 'piggy' | 'shop'>('home');
   const [historyFilter, setHistoryFilter] = useState<'MEO' | 'ME' | 'BILL'>('MEO');
   
   const [showBill, setShowBill] = useState(false);
@@ -69,10 +69,33 @@ export default function App() {
   // Edit TET_SAVING State
   const [isEditingTetSaving, setIsEditingTetSaving] = useState(false);
   const [tempTetSavingBalance, setTempTetSavingBalance] = useState('');
+
+  type PiggyDay = {
+      date: string;
+      amount: number;
+      done: boolean;
+      txId?: string;
+      reversedTxId?: string;
+      doneAt?: string;
+      undoneAt?: string;
+  };
+
+  type PiggyPlan = {
+      id: string;
+      goalAmount: number;
+      targetDate: string;
+      startDate: string;
+      createdAt: string;
+      days: PiggyDay[];
+  };
+
+  const [piggyGoal, setPiggyGoal] = useState('');
+  const [piggyTargetDate, setPiggyTargetDate] = useState<Date>(new Date());
+  const [piggyPlan, setPiggyPlan] = useState<PiggyPlan | null>(null);
   
   // Shop State
   const [activeShop, setActiveShop] = useState<string>('elank');
-  const [shopView, setShopView] = useState<'overview' | 'inventory' | 'finance' | 'orders'>('overview');
+  const [shopView, setShopView] = useState<'overview' | 'inventory' | 'finance' | 'orders'>('finance');
 
   const [products, setProducts] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
@@ -118,12 +141,13 @@ export default function App() {
             await supabaseService.ensureTetSavingExists(INITIAL_ACCOUNTS);
             
             // Fetch data concurrently
-            const [fetchedAccounts, fetchedTransactions, fetchedShopProducts, fetchedShopOrders, fetchedShopFinances] = await Promise.all([
+            const [fetchedAccounts, fetchedTransactions, fetchedShopProducts, fetchedShopOrders, fetchedShopFinances, fetchedPiggyPlan] = await Promise.all([
                 supabaseService.getAccounts(),
                 supabaseService.getTransactions(),
                 supabaseService.getShopProducts(),
                 supabaseService.getShopOrders(),
-                supabaseService.getShopFinances()
+                supabaseService.getShopFinances(),
+                supabaseService.getPiggyPlan().catch(() => null)
             ]);
 
             setAccounts(fetchedAccounts);
@@ -131,6 +155,24 @@ export default function App() {
             setProducts(fetchedShopProducts);
             setOrders(fetchedShopOrders);
             setShopFinances(fetchedShopFinances);
+            if (fetchedPiggyPlan && fetchedPiggyPlan.days && Array.isArray(fetchedPiggyPlan.days)) {
+                setPiggyPlan(fetchedPiggyPlan);
+                if (typeof fetchedPiggyPlan.goalAmount === 'number') setPiggyGoal(formatNumberInput(String(fetchedPiggyPlan.goalAmount)));
+                if (typeof fetchedPiggyPlan.targetDate === 'string') setPiggyTargetDate(new Date(fetchedPiggyPlan.targetDate));
+            } else {
+                try {
+                    const raw = localStorage.getItem('piggyPlan_v1');
+                    if (raw) {
+                        const parsed = JSON.parse(raw);
+                        if (parsed && parsed.days && Array.isArray(parsed.days)) {
+                            setPiggyPlan(parsed);
+                            if (typeof parsed.goalAmount === 'number') setPiggyGoal(formatNumberInput(String(parsed.goalAmount)));
+                            if (typeof parsed.targetDate === 'string') setPiggyTargetDate(new Date(parsed.targetDate));
+                            supabaseService.upsertPiggyPlan(parsed).catch(() => {});
+                        }
+                    }
+                } catch (e) {}
+            }
         } catch (error) {
             console.error("Failed to load data from Supabase:", error);
             // Don't show alert loop, just UI state
@@ -143,8 +185,25 @@ export default function App() {
     loadData();
   }, []);
 
+  useEffect(() => {
+      try {
+          if (!piggyPlan) {
+              localStorage.removeItem('piggyPlan_v1');
+              return;
+          }
+          localStorage.setItem('piggyPlan_v1', JSON.stringify(piggyPlan));
+      } catch (e) {}
+      if (!piggyPlan) return;
+      const t = window.setTimeout(() => {
+          supabaseService.upsertPiggyPlan(piggyPlan).catch(() => {});
+      }, 800);
+      return () => window.clearTimeout(t);
+  }, [piggyPlan]);
+
   // Derived Values
-  const totalBalance = accounts.reduce((acc, curr) => acc + curr.balance, 0);
+  const totalBalance = accounts
+    .filter(a => a.id === AccountType.CASH || a.id === AccountType.MB || a.id === AccountType.SAVING || a.id === AccountType.TCB)
+    .reduce((acc, curr) => acc + curr.balance, 0);
   
   // Calculate Debt
   const activeTransactions = transactions.filter(t => !t.isSettled && t.type !== TransactionType.TRANSFER && t.type !== TransactionType.SETTLEMENT && t.type !== TransactionType.INCOME);
@@ -555,6 +614,219 @@ export default function App() {
         console.error("Error transferring", error);
         alert("Lỗi chuyển tiền.");
     }
+  };
+
+  const toDateKey = (d: Date) => {
+      const dd = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      const y = dd.getFullYear();
+      const m = String(dd.getMonth() + 1).padStart(2, '0');
+      const day = String(dd.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+  };
+
+  const parseDateKey = (key: string) => {
+      const [y, m, d] = key.split('-').map(n => parseInt(n, 10));
+      return new Date(y, (m || 1) - 1, d || 1);
+  };
+
+  const applyTransferInternal = async (from: AccountType, to: AccountType, amountVal: number, description: string) => {
+      const fromAcc = accounts.find(a => a.id === from);
+      const toAcc = accounts.find(a => a.id === to);
+      if (!fromAcc || !toAcc) throw new Error('Missing account');
+
+      const newTx: Transaction = {
+          id: Date.now().toString(),
+          date: new Date().toISOString(),
+          description,
+          amount: amountVal,
+          accountId: from,
+          toAccountId: to,
+          splitType: SplitType.ME_ONLY,
+          type: TransactionType.TRANSFER,
+          isSettled: true
+      };
+
+      let newFromBalance = fromAcc.balance;
+      let newToBalance = toAcc.balance;
+      let mbBalanceUpdate: number | null = null;
+
+      if (from === AccountType.MB && to === AccountType.TET_SAVING) {
+          newFromBalance = fromAcc.balance;
+          newToBalance = toAcc.balance + amountVal;
+      } else if (from === AccountType.TET_SAVING && to === AccountType.MB) {
+          newFromBalance = fromAcc.balance - amountVal;
+          newToBalance = toAcc.balance;
+      } else if (to === AccountType.TET_SAVING) {
+          newFromBalance = fromAcc.balance - amountVal;
+          newToBalance = toAcc.balance + amountVal;
+          const mbAcc = accounts.find(a => a.id === AccountType.MB);
+          if (mbAcc) mbBalanceUpdate = mbAcc.balance + amountVal;
+      } else if (from === AccountType.TET_SAVING) {
+          newFromBalance = fromAcc.balance - amountVal;
+          newToBalance = toAcc.balance + amountVal;
+          const mbAcc = accounts.find(a => a.id === AccountType.MB);
+          if (mbAcc) mbBalanceUpdate = mbAcc.balance - amountVal;
+      } else {
+          newFromBalance = fromAcc.balance - amountVal;
+          newToBalance = toAcc.balance + amountVal;
+      }
+
+      const promises = [
+          supabaseService.addTransaction(newTx),
+          supabaseService.updateAccountBalance(from, newFromBalance),
+          supabaseService.updateAccountBalance(to, newToBalance)
+      ];
+      if (mbBalanceUpdate !== null) {
+          promises.push(supabaseService.updateAccountBalance(AccountType.MB, mbBalanceUpdate));
+      }
+
+      await Promise.all(promises);
+
+      setTransactions(prev => [newTx, ...prev]);
+      setAccounts(prev => prev.map(acc => {
+          if (acc.id === from) return { ...acc, balance: newFromBalance };
+          if (acc.id === to) return { ...acc, balance: newToBalance };
+          if (mbBalanceUpdate !== null && acc.id === AccountType.MB) return { ...acc, balance: mbBalanceUpdate };
+          return acc;
+      }));
+
+      return newTx.id;
+  };
+
+  const generatePiggyPlanDays = (goalAmount: number, targetDate: Date) => {
+      const start = new Date();
+      const startLocal = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+      const endLocal = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
+      if (endLocal.getTime() < startLocal.getTime()) return [];
+
+      const dates: Date[] = [];
+      const cursor = new Date(startLocal);
+      while (cursor.getTime() <= endLocal.getTime()) {
+          dates.push(new Date(cursor));
+          cursor.setDate(cursor.getDate() + 1);
+      }
+
+      const n = dates.length;
+      if (n === 0) return [];
+
+      let unit = 1000;
+      if (goalAmount < n * 1000) unit = 100;
+      if (goalAmount < n * 100) unit = 1;
+
+      const totalUnits = Math.floor(goalAmount / unit);
+      const remainder = goalAmount - totalUnits * unit;
+
+      const minUnits = totalUnits >= n ? 1 : 0;
+      const units = Array(n).fill(minUnits);
+      let remaining = totalUnits - minUnits * n;
+
+      if (remaining > 0) {
+          const weights = Array.from({ length: n }, () => Math.random());
+          const sumW = weights.reduce((s, w) => s + w, 0) || 1;
+          const alloc = weights.map(w => Math.floor((w / sumW) * remaining));
+          let used = 0;
+          for (let i = 0; i < n; i++) {
+              units[i] += alloc[i];
+              used += alloc[i];
+          }
+          let leftover = remaining - used;
+          while (leftover > 0) {
+              const idx = Math.floor(Math.random() * n);
+              units[idx] += 1;
+              leftover -= 1;
+          }
+      }
+
+      const days: PiggyDay[] = dates.map((d, i) => ({
+          date: toDateKey(d),
+          amount: units[i] * unit,
+          done: false
+      }));
+
+      if (remainder > 0) {
+          days[days.length - 1] = { ...days[days.length - 1], amount: days[days.length - 1].amount + remainder };
+      }
+
+      const total = days.reduce((s, x) => s + x.amount, 0);
+      if (total !== goalAmount) {
+          const diff = goalAmount - total;
+          days[days.length - 1] = { ...days[days.length - 1], amount: Math.max(0, days[days.length - 1].amount + diff) };
+      }
+
+      return days;
+  };
+
+  const handleCreatePiggyPlan = () => {
+      const goalAmount = parseSmartAmount(piggyGoal);
+      if (goalAmount <= 0) {
+          alert('Vui lòng nhập số tiền mục tiêu');
+          return;
+      }
+      const days = generatePiggyPlanDays(goalAmount, piggyTargetDate);
+      if (days.length === 0) {
+          alert('Ngày hoàn thành không hợp lệ');
+          return;
+      }
+      const plan: PiggyPlan = {
+          id: 'piggy-' + Date.now().toString(),
+          goalAmount,
+          startDate: toDateKey(new Date()),
+          targetDate: new Date(piggyTargetDate.getFullYear(), piggyTargetDate.getMonth(), piggyTargetDate.getDate()).toISOString(),
+          createdAt: new Date().toISOString(),
+          days
+      };
+      setPiggyPlan(plan);
+  };
+
+  const handleTogglePiggyDay = async (dateKey: string) => {
+      if (!piggyPlan) return;
+      const day = piggyPlan.days.find(d => d.date === dateKey);
+      if (!day) return;
+      const amountVal = day.amount;
+      if (amountVal <= 0) return;
+
+      const mb = accounts.find(a => a.id === AccountType.MB)?.balance || 0;
+      const tet = accounts.find(a => a.id === AccountType.TET_SAVING)?.balance || 0;
+      const available = mb - tet;
+
+      try {
+          if (!day.done) {
+              if (available < amountVal) {
+                  alert('Số dư khả dụng MB Bank không đủ');
+                  return;
+              }
+              const txId = await applyTransferInternal(
+                  AccountType.MB,
+                  AccountType.TET_SAVING,
+                  amountVal,
+                  `Ống heo: Góp ${parseDateKey(dateKey).toLocaleDateString('vi-VN')}`
+              );
+              setPiggyPlan(prev => {
+                  if (!prev) return prev;
+                  return {
+                      ...prev,
+                      days: prev.days.map(d => d.date === dateKey ? { ...d, done: true, txId, doneAt: new Date().toISOString() } : d)
+                  };
+              });
+          } else {
+              const reversedTxId = await applyTransferInternal(
+                  AccountType.TET_SAVING,
+                  AccountType.MB,
+                  amountVal,
+                  `Ống heo: Hoàn tác ${parseDateKey(dateKey).toLocaleDateString('vi-VN')}`
+              );
+              setPiggyPlan(prev => {
+                  if (!prev) return prev;
+                  return {
+                      ...prev,
+                      days: prev.days.map(d => d.date === dateKey ? { ...d, done: false, reversedTxId, undoneAt: new Date().toISOString() } : d)
+                  };
+              });
+          }
+      } catch (e) {
+          console.error('Piggy transfer error', e);
+          alert('Lỗi khi chuyển tiền Ống heo');
+      }
   };
 
   const handleSettleDebts = async (txIds: string[], finalPayment: number, surplus: number) => {
@@ -2209,6 +2481,202 @@ export default function App() {
       );
   };
 
+  const renderPiggy = () => {
+      const mb = accounts.find(a => a.id === AccountType.MB)?.balance || 0;
+      const tet = accounts.find(a => a.id === AccountType.TET_SAVING)?.balance || 0;
+      const available = mb - tet;
+      const todayKey = toDateKey(new Date());
+
+      const goalAmount = piggyPlan?.goalAmount || parseSmartAmount(piggyGoal) || 0;
+      const doneTotal = piggyPlan ? piggyPlan.days.filter(d => d.done).reduce((s, d) => s + d.amount, 0) : 0;
+      const remainingTotal = Math.max(0, goalAmount - doneTotal);
+      const doneDays = piggyPlan ? piggyPlan.days.filter(d => d.done).length : 0;
+      const totalDays = piggyPlan ? piggyPlan.days.length : 0;
+      const progressPct = piggyPlan && goalAmount > 0 ? Math.min(100, Math.round((doneTotal / goalAmount) * 100)) : 0;
+
+      return (
+          <div className="pb-32 animate-fade-in pt-4 space-y-6">
+              <div className="flex items-center justify-between mb-1 px-1">
+                  <h2 className="text-2xl font-bold text-slate-800">Ống heo</h2>
+                  {piggyPlan && (
+                      <button
+                          onClick={() => {
+                              if (!window.confirm('Xoá kế hoạch Ống heo hiện tại?')) return;
+                              const currentId = piggyPlan.id;
+                              setPiggyPlan(null);
+                              supabaseService.deletePiggyPlan(currentId).catch(() => {});
+                          }}
+                          className="text-xs font-bold px-3 py-2 rounded-xl bg-rose-50 text-rose-600 border border-rose-200 active:scale-95"
+                      >
+                          Xoá kế hoạch
+                      </button>
+                  )}
+              </div>
+
+              <div className="bg-gradient-to-br from-pink-500 to-rose-600 rounded-3xl p-5 text-white shadow-lg shadow-pink-200 relative overflow-hidden">
+                  <div className="absolute -top-10 -right-10 w-40 h-40 bg-white opacity-10 rounded-full blur-2xl"></div>
+                  <div className="relative z-10 space-y-3">
+                      <div className="flex items-start justify-between gap-4">
+                          <div>
+                              <p className="text-pink-100 text-sm font-medium mb-1 flex items-center gap-1">
+                                  <span className="material-symbols-rounded text-sm">celebration</span>
+                                  Tiết kiệm ăn Tết
+                              </p>
+                              <p className="text-3xl font-bold tracking-tight">{formatCurrency(tet)}</p>
+                          </div>
+                          <div className="text-right">
+                              <p className="text-[10px] text-pink-100 uppercase tracking-wider font-bold">Khả dụng MB</p>
+                              <p className="text-lg font-bold">{formatCurrency(available)}</p>
+                          </div>
+                      </div>
+
+                      {piggyPlan && (
+                          <div className="bg-white/10 rounded-2xl p-3 border border-white/10">
+                              <div className="flex items-center justify-between text-xs font-bold text-pink-100">
+                                  <span>Tiến độ</span>
+                                  <span>{progressPct}%</span>
+                              </div>
+                              <div className="h-2 bg-white/15 rounded-full mt-2 overflow-hidden">
+                                  <div className="h-full bg-white/80 rounded-full" style={{ width: `${progressPct}%` }}></div>
+                              </div>
+                          </div>
+                      )}
+                  </div>
+              </div>
+
+              <div className="bg-white p-5 rounded-[24px] shadow-sm border border-slate-100">
+                  <h3 className="font-bold text-slate-800 mb-4">Thiết lập mục tiêu</h3>
+                  <div className="space-y-4">
+                      <div>
+                          <label className="text-xs font-bold text-slate-500 mb-1.5 block">Số tiền mục tiêu</label>
+                          <input
+                              type="text"
+                              inputMode="numeric"
+                              placeholder="0"
+                              value={piggyGoal}
+                              onChange={(e) => setPiggyGoal(formatNumberInput(e.target.value))}
+                              className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500"
+                          />
+                      </div>
+                      <div>
+                          <label className="text-xs font-bold text-slate-500 mb-1.5 block">Ngày hoàn thành</label>
+                          <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl">
+                              <span className="material-symbols-rounded text-slate-400">calendar_month</span>
+                              <DatePicker
+                                  selected={piggyTargetDate}
+                                  onChange={(date) => date && setPiggyTargetDate(date)}
+                                  dateFormat="dd/MM/yyyy"
+                                  locale={vi}
+                                  minDate={new Date()}
+                                  className="bg-transparent outline-none text-sm font-bold text-slate-700 w-full"
+                              />
+                          </div>
+                      </div>
+                      <div className="grid grid-cols-1 gap-2">
+                          <button
+                              onClick={handleCreatePiggyPlan}
+                              className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl shadow-md shadow-slate-200 active:scale-95 transition-all"
+                          >
+                              Tạo kế hoạch ngẫu nhiên
+                          </button>
+                          {piggyPlan && (
+                              <button
+                                  onClick={() => {
+                                      if (!window.confirm('Tạo lại kế hoạch ngẫu nhiên sẽ reset các ngày đã đánh dấu. Tiếp tục?')) return;
+                                      handleCreatePiggyPlan();
+                                  }}
+                                  className="w-full py-3 bg-white text-slate-700 font-bold rounded-xl border border-slate-200 active:scale-95 transition-all"
+                              >
+                                  Tạo lại ngẫu nhiên
+                              </button>
+                          )}
+                      </div>
+                  </div>
+              </div>
+
+              {piggyPlan && (
+                  <div className="space-y-4">
+                      <div className="bg-white p-5 rounded-[24px] shadow-sm border border-slate-100">
+                          <div className="flex items-start justify-between gap-3">
+                              <div>
+                                  <h3 className="font-bold text-slate-800">Tổng quan</h3>
+                                  <p className="text-xs text-slate-500 mt-1">
+                                      Mục tiêu: <span className="font-bold text-slate-700">{formatCurrency(piggyPlan.goalAmount)}</span> • Hạn: <span className="font-bold text-slate-700">{new Date(piggyPlan.targetDate).toLocaleDateString('vi-VN')}</span>
+                                  </p>
+                              </div>
+                              <div className="text-right">
+                                  <p className="text-[10px] text-slate-400 uppercase font-bold">Đã góp</p>
+                                  <p className="text-sm font-bold text-emerald-600">{formatCurrency(doneTotal)}</p>
+                              </div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 mt-4">
+                              <div className="bg-slate-50 rounded-2xl p-3 border border-slate-100">
+                                  <p className="text-[10px] text-slate-400 uppercase font-bold">Còn lại</p>
+                                  <p className="text-sm font-bold text-slate-800">{formatCurrency(remainingTotal)}</p>
+                              </div>
+                              <div className="bg-slate-50 rounded-2xl p-3 border border-slate-100">
+                                  <p className="text-[10px] text-slate-400 uppercase font-bold">Ngày đã góp</p>
+                                  <p className="text-sm font-bold text-slate-800">{doneDays}/{totalDays}</p>
+                              </div>
+                              <div className="bg-slate-50 rounded-2xl p-3 border border-slate-100">
+                                  <p className="text-[10px] text-slate-400 uppercase font-bold">TB/ngày</p>
+                                  <p className="text-sm font-bold text-slate-800">
+                                      {formatCurrency(totalDays > 0 ? Math.round(piggyPlan.goalAmount / totalDays) : 0)}
+                                  </p>
+                              </div>
+                          </div>
+                      </div>
+
+                      <div className="bg-white p-5 rounded-[24px] shadow-sm border border-slate-100">
+                          <h3 className="font-bold text-slate-800 mb-3">Danh sách ngày</h3>
+                          <div className="space-y-2">
+                              {piggyPlan.days.map(d => {
+                                  const isToday = d.date === todayKey;
+                                  const isPast = d.date < todayKey;
+                                  const bg = d.done
+                                      ? 'bg-emerald-50 border-emerald-100'
+                                      : isToday
+                                          ? 'bg-indigo-50 border-indigo-100'
+                                          : isPast
+                                              ? 'bg-amber-50 border-amber-100'
+                                              : 'bg-white border-slate-100';
+                                  return (
+                                      <div key={d.date} className={`p-3 rounded-2xl border flex items-center justify-between gap-3 ${bg}`}>
+                                          <div className="min-w-0">
+                                              <p className="text-sm font-bold text-slate-800">
+                                                  {parseDateKey(d.date).toLocaleDateString('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit' })}
+                                              </p>
+                                              <p className="text-[11px] text-slate-500">
+                                                  {d.done ? 'Đã góp' : isPast ? 'Quá hạn' : isToday ? 'Hôm nay' : 'Chưa góp'}
+                                              </p>
+                                          </div>
+                                          <div className="text-right flex items-center gap-2">
+                                              <div>
+                                                  <p className="text-[10px] text-slate-400 uppercase font-bold">Số tiền</p>
+                                                  <p className="text-sm font-bold text-slate-800">{formatCurrency(d.amount)}</p>
+                                              </div>
+                                              <button
+                                                  onClick={() => handleTogglePiggyDay(d.date)}
+                                                  className={`px-3 py-2 rounded-xl text-xs font-bold border active:scale-95 transition-all ${
+                                                      d.done
+                                                          ? 'bg-white text-slate-700 border-slate-200'
+                                                          : 'bg-slate-900 text-white border-slate-900'
+                                                  }`}
+                                              >
+                                                  {d.done ? 'Hoàn tác' : 'Đã góp'}
+                                              </button>
+                                          </div>
+                                      </div>
+                                  );
+                              })}
+                          </div>
+                      </div>
+                  </div>
+              )}
+          </div>
+      );
+  };
+
   const renderShop = () => {
       const shops = [
           { id: 'elank', name: 'Elank Studio', icon: 'palette' }
@@ -2293,20 +2761,7 @@ export default function App() {
               {shopView === 'inventory' && renderShopInventory()}
               {shopView === 'orders' && renderShopOrders()}
               {shopView === 'finance' && renderShopFinance()}
-              {shopView === 'overview' && (
-                  <div className="bg-slate-50 rounded-[24px] p-8 border border-slate-100 text-center flex flex-col items-center justify-center">
-                      <span className="material-symbols-rounded text-5xl text-slate-300 mb-4">
-                          storefront
-                      </span>
-                      <h4 className="text-lg font-bold text-slate-800 mb-2">Tổng quan</h4>
-                      <p className="text-slate-500 text-sm font-medium">
-                          Chọn một chức năng bên trên để bắt đầu quản lý <br/>
-                          <span className="font-bold text-indigo-600 mt-1 inline-block">
-                              {shops.find(s => s.id === activeShop)?.name}
-                          </span>
-                      </p>
-                  </div>
-              )}
+              {shopView === 'overview' && renderShopFinance()}
           </div>
       );
   };
@@ -2364,6 +2819,17 @@ export default function App() {
                       {renderHistory()}
                   </motion.div>
               )}
+              {activeTab === 'piggy' && (
+                  <motion.div
+                      key="piggy"
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 20 }}
+                      transition={{ duration: 0.2, ease: "easeInOut" }}
+                  >
+                      {renderPiggy()}
+                  </motion.div>
+              )}
               {activeTab === 'shop' && (
                   <motion.div
                       key="shop"
@@ -2395,6 +2861,14 @@ export default function App() {
                 >
                     <span className={`material-symbols-rounded text-[24px] ${activeTab === 'history' ? 'fill-1' : ''}`}>calendar_month</span>
                     <span className="text-[10px] font-bold">Lịch sử</span>
+                </button>
+
+                <button 
+                    onClick={() => setActiveTab('piggy')}
+                    className={`flex flex-col items-center gap-0.5 p-1.5 rounded-xl transition-all active:scale-95 ${activeTab === 'piggy' ? 'text-indigo-600 bg-indigo-50/50' : 'text-slate-400'}`}
+                >
+                    <span className={`material-symbols-rounded text-[24px] ${activeTab === 'piggy' ? 'fill-1' : ''}`}>savings</span>
+                    <span className="text-[10px] font-bold">Ống heo</span>
                 </button>
 
                 <button 
