@@ -1182,13 +1182,44 @@ export default function App() {
       const newMb = mbAcc.balance - amountVal;
 
       try {
-          if (!isHistorical) {
-              await Promise.all([
-                  supabaseService.addTransaction(newTx),
-                  supabaseService.updateAccountBalance(AccountType.TET_SAVING, newTet),
-                  supabaseService.updateAccountBalance(AccountType.MB, newMb)
-              ]);
+          const baseGold: GoldState = goldState && typeof goldState.totalPhan === 'number'
+              ? {
+                  id: goldState.id || 'gold-default',
+                  totalPhan: goldState.totalPhan || 0,
+                  purchases: Array.isArray(goldState.purchases) ? goldState.purchases : [],
+                  withdrawals: Array.isArray(goldState.withdrawals) ? goldState.withdrawals : [],
+                  updatedAt: goldState.updatedAt
+              }
+              : { id: 'gold-default', totalPhan: 0, purchases: [], withdrawals: [] };
 
+          const nextPurchase = {
+              id: purchaseId,
+              date: buyDate.toISOString(),
+              amount: amountVal,
+              totalPhan,
+              brand,
+              isHistorical
+          };
+
+          const nextGoldState: GoldState = {
+              ...baseGold,
+              id: baseGold.id || 'gold-default',
+              totalPhan: Math.max(0, (baseGold.totalPhan || 0) + totalPhan),
+              purchases: [nextPurchase, ...(baseGold.purchases || [])],
+              withdrawals: baseGold.withdrawals || [],
+              updatedAt: new Date().toISOString()
+          };
+
+          const tasks: Promise<any>[] = [supabaseService.upsertGoldState(nextGoldState)];
+          if (!isHistorical) {
+              tasks.push(supabaseService.addTransaction(newTx));
+              tasks.push(supabaseService.updateAccountBalance(AccountType.TET_SAVING, newTet));
+              tasks.push(supabaseService.updateAccountBalance(AccountType.MB, newMb));
+          }
+
+          await Promise.all(tasks);
+
+          if (!isHistorical) {
               setTransactions(prev => [newTx, ...prev]);
               setAccounts(prev => prev.map(acc => {
                   if (acc.id === AccountType.TET_SAVING) return { ...acc, balance: newTet };
@@ -1197,27 +1228,7 @@ export default function App() {
               }));
           }
 
-          setGoldState(prev => {
-              const base: GoldState = prev && typeof prev.totalPhan === 'number'
-                  ? prev
-                  : { id: 'gold-default', totalPhan: 0, purchases: [], withdrawals: [] };
-              const nextPurchase = {
-                  id: purchaseId,
-                  date: buyDate.toISOString(),
-                  amount: amountVal,
-                  totalPhan,
-                  brand,
-                  isHistorical
-              };
-              return {
-                  ...base,
-                  id: base.id || 'gold-default',
-                  totalPhan: Math.max(0, (base.totalPhan || 0) + totalPhan),
-                  purchases: [nextPurchase, ...(base.purchases || [])],
-                  withdrawals: base.withdrawals || [],
-                  updatedAt: new Date().toISOString()
-              };
-          });
+          setGoldState(nextGoldState);
 
           setGoldBuyBrand('');
           setGoldBuyAmount('');
