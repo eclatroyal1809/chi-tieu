@@ -96,6 +96,7 @@ export default function App() {
       totalPhan: number;
       brandTotals?: Record<string, number>; // brand -> totalPhan
       brandMoneySpent?: Record<string, number>; // brand -> total VND spent
+      brands?: string[]; // remembered brands
       updatedAt?: string;
   };
 
@@ -1005,10 +1006,11 @@ export default function App() {
           setGoldState(prev => {
               const base: GoldState = prev && typeof prev.totalPhan === 'number'
                   ? prev
-                  : { id: 'gold-default', totalPhan: 0, brandTotals: {}, brandMoneySpent: {} };
+                  : { id: 'gold-default', totalPhan: 0, brandTotals: {}, brandMoneySpent: {}, brands: GOLD_BRANDS };
               
               const currentBrandTotals = base.brandTotals || {};
               const currentBrandMoneySpent = base.brandMoneySpent || {};
+              const currentBrands = base.brands || GOLD_BRANDS;
               
               const newBrandTotals = {
                   ...currentBrandTotals,
@@ -1020,12 +1022,17 @@ export default function App() {
                   [goldBuyBrand]: (currentBrandMoneySpent[goldBuyBrand] || 0) + amountVal
               };
 
+              const newBrands = currentBrands.includes(goldBuyBrand) 
+                ? currentBrands 
+                : [...currentBrands, goldBuyBrand];
+
               return {
                   ...base,
                   id: base.id || 'gold-default',
                   totalPhan: Math.max(0, (base.totalPhan || 0) + totalPhan),
                   brandTotals: newBrandTotals,
                   brandMoneySpent: newBrandMoneySpent,
+                  brands: newBrands,
                   updatedAt: new Date().toISOString()
               };
           });
@@ -1567,6 +1574,12 @@ export default function App() {
 
   const renderGold = () => {
     const goldUnits = fromTotalPhan(goldState?.totalPhan || 0);
+    const goldBrands = goldState?.brands || GOLD_BRANDS;
+
+    // Filter gold transactions and sort by date ascending (oldest to newest)
+    const goldHistory = transactions
+        .filter(t => t.description.includes('vàng'))
+        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     return (
       <div className="pb-32">
@@ -1650,13 +1663,16 @@ export default function App() {
                         <div className="grid grid-cols-2 gap-3">
                             <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
                                 <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Thương hiệu</label>
-                                <select 
+                                <input 
+                                    list="gold-brands-buy"
                                     value={goldBuyBrand} 
                                     onChange={(e) => setGoldBuyBrand(e.target.value)}
+                                    placeholder="Nhập hoặc chọn..."
                                     className="w-full bg-transparent font-bold text-slate-700 outline-none"
-                                >
-                                    {GOLD_BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
-                                </select>
+                                />
+                                <datalist id="gold-brands-buy">
+                                    {goldBrands.map(b => <option key={b} value={b} />)}
+                                </datalist>
                             </div>
                             <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
                                 <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Ngày mua</label>
@@ -1745,7 +1761,7 @@ export default function App() {
                                     onChange={(e) => setGoldWithdrawBrand(e.target.value)}
                                     className="w-full bg-transparent font-bold text-slate-700 outline-none"
                                 >
-                                    {GOLD_BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
+                                    {goldBrands.map(b => <option key={b} value={b}>{b}</option>)}
                                 </select>
                             </div>
                         </div>
@@ -1807,6 +1823,48 @@ export default function App() {
                         </button>
                     </div>
                 )}
+            </div>
+
+            {/* Gold History Section */}
+            <div className="bg-white rounded-[32px] p-6 shadow-xl shadow-slate-100 border border-slate-100">
+                <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-2">
+                    <span className="material-symbols-rounded text-indigo-600">history</span>
+                    Lịch sử đầu tư (Cũ → Mới)
+                </h3>
+                
+                <div className="space-y-4">
+                    {goldHistory.length === 0 ? (
+                        <p className="text-center text-slate-400 py-8 font-bold text-sm italic">Chưa có giao dịch vàng nào</p>
+                    ) : (
+                        goldHistory.map((t, idx) => (
+                            <div key={t.id} className="flex gap-4 items-start relative">
+                                {idx !== goldHistory.length - 1 && (
+                                    <div className="absolute left-[19px] top-10 bottom-[-16px] w-0.5 bg-slate-100"></div>
+                                )}
+                                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 z-10 ${
+                                    t.type === TransactionType.EXPENSE ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'
+                                }`}>
+                                    <span className="material-symbols-rounded text-xl">
+                                        {t.type === TransactionType.EXPENSE ? 'add_shopping_cart' : 'sell'}
+                                    </span>
+                                </div>
+                                <div className="flex-1 pt-1">
+                                    <div className="flex justify-between items-start mb-0.5">
+                                        <p className="font-bold text-slate-800 text-sm leading-snug">{t.description}</p>
+                                        <p className={`font-black text-sm ${
+                                            t.type === TransactionType.EXPENSE ? 'text-rose-500' : 'text-emerald-500'
+                                        }`}>
+                                            {t.type === TransactionType.EXPENSE ? '-' : '+'}{formatCurrency(t.amount)}
+                                        </p>
+                                    </div>
+                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                        {new Date(t.date).toLocaleDateString('vi-VN')}
+                                    </p>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
             </div>
         </div>
       </div>
