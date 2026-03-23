@@ -20,6 +20,7 @@ export type GoldState = {
         date: string;
         amount: number;
         totalPhan: number;
+        brand?: string;
     }[];
     updatedAt?: string;
 };
@@ -81,6 +82,7 @@ export const GoldTab: React.FC<GoldTabProps> = ({
     const [goldWithdrawChi, setGoldWithdrawChi] = useState('');
     const [goldWithdrawPhan, setGoldWithdrawPhan] = useState('');
     const [goldWithdrawDate, setGoldWithdrawDate] = useState<Date>(new Date());
+    const [goldWithdrawBrand, setGoldWithdrawBrand] = useState('');
 
     const resetGoldPurchases = async (opts?: { askConfirm?: boolean }) => {
         const askConfirm = opts?.askConfirm !== false;
@@ -447,6 +449,16 @@ export const GoldTab: React.FC<GoldTabProps> = ({
             alert('Vui lòng nhập số tiền thu về khi rút vàng');
             return;
         }
+        if (!goldWithdrawBrand) {
+            alert('Vui lòng chọn thương hiệu vàng muốn rút');
+            return;
+        }
+
+        const brandHolding = brandTotals.find(bt => bt.brand === goldWithdrawBrand)?.totalPhan || 0;
+        if (brandHolding < totalPhan) {
+            alert(`Số lượng vàng của thương hiệu ${goldWithdrawBrand} không đủ (còn ${fromTotalPhan(brandHolding).luong}L ${fromTotalPhan(brandHolding).chi}C ${fromTotalPhan(brandHolding).phan}P)`);
+            return;
+        }
 
         const currentHolding = goldState?.totalPhan || 0;
         if (currentHolding < totalPhan) {
@@ -498,7 +510,8 @@ export const GoldTab: React.FC<GoldTabProps> = ({
                     id: newTx.id,
                     date: withdrawDate.toISOString(),
                     amount: amountVal,
-                    totalPhan
+                    totalPhan,
+                    brand: goldWithdrawBrand
                 };
                 return {
                     ...base,
@@ -515,6 +528,7 @@ export const GoldTab: React.FC<GoldTabProps> = ({
             setGoldWithdrawChi('');
             setGoldWithdrawPhan('');
             setGoldWithdrawDate(new Date());
+            setGoldWithdrawBrand('');
         } catch (e) {
             console.error('Withdraw gold error', e);
             alert('Lỗi khi rút vàng');
@@ -625,8 +639,17 @@ export const GoldTab: React.FC<GoldTabProps> = ({
         acc[key].totalPhan += (p.totalPhan ?? 0);
         return acc;
     }, {});
+
+    (goldState?.withdrawals || []).forEach(w => {
+        const key = ((w.brand || '').trim() || 'Không rõ');
+        if (brandTotalsMap[key]) {
+            brandTotalsMap[key].totalPhan -= (w.totalPhan ?? 0);
+        }
+    });
+
     const brandTotals = Object.keys(brandTotalsMap)
         .map(brand => ({ brand, total: brandTotalsMap[brand].amount, totalPhan: brandTotalsMap[brand].totalPhan }))
+        .filter(bt => bt.totalPhan > 0)
         .sort((a, b) => b.total - a.total);
 
     const uniqueBrands = Array.from(new Set((goldState?.purchases || []).map(p => (p.brand || '').trim()).filter(Boolean)));
@@ -830,6 +853,19 @@ export const GoldTab: React.FC<GoldTabProps> = ({
                     <h3 className="font-bold text-slate-800 mb-4">Rút vàng (Bán)</h3>
                     <div className="space-y-3">
                         <div>
+                            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Thương hiệu</label>
+                            <select
+                                value={goldWithdrawBrand}
+                                onChange={e => setGoldWithdrawBrand(e.target.value)}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all appearance-none"
+                            >
+                                <option value="">Chọn thương hiệu...</option>
+                                {brandTotals.map(bt => (
+                                    <option key={bt.brand} value={bt.brand}>{bt.brand} (Còn {fromTotalPhan(bt.totalPhan).luong}L {fromTotalPhan(bt.totalPhan).chi}C {fromTotalPhan(bt.totalPhan).phan}P)</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div>
                             <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Số tiền thu về</label>
                             <input
                                 type="text"
@@ -911,7 +947,7 @@ export const GoldTab: React.FC<GoldTabProps> = ({
                                         <div key={w.id} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-100">
                                             <div>
                                                 <p className="font-bold text-slate-800 text-sm">
-                                                    Rút vàng <span className="text-slate-400 font-normal text-xs ml-1">({new Date(w.date).toLocaleDateString('vi-VN')})</span>
+                                                    {w.brand || 'Rút vàng'} <span className="text-slate-400 font-normal text-xs ml-1">({new Date(w.date).toLocaleDateString('vi-VN')})</span>
                                                 </p>
                                                 <p className="text-xs text-slate-500 mt-0.5">{units.luong} lượng {units.chi} chỉ {units.phan} phân</p>
                                             </div>
