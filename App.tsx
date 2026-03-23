@@ -31,7 +31,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [configError, setConfigError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'home' | 'history' | 'piggy' | 'shop'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'history' | 'piggy' | 'gold' | 'shop'>('home');
   const [historyFilter, setHistoryFilter] = useState<'MEO' | 'ME' | 'BILL'>('MEO');
   
   const [showBill, setShowBill] = useState(false);
@@ -3141,8 +3141,6 @@ export default function App() {
       const doneDays = piggyPlan ? piggyPlan.days.filter(d => d.done).length : 0;
       const totalDays = piggyPlan ? piggyPlan.days.length : 0;
       const progressPct = piggyPlan && goalAmount > 0 ? Math.min(100, Math.round((doneTotal / goalAmount) * 100)) : 0;
-      const goldTotalPhan = goldState?.totalPhan || 0;
-      const goldUnits = fromTotalPhan(goldTotalPhan);
 
       return (
           <div className="pb-32 animate-fade-in pt-4 space-y-6">
@@ -3194,11 +3192,162 @@ export default function App() {
                   </div>
               </div>
 
+              <div className="bg-white p-5 rounded-[24px] shadow-sm border border-slate-100">
+                  <h3 className="font-bold text-slate-800 mb-4">Thiết lập mục tiêu</h3>
+                  <div className="space-y-4">
+                      <div>
+                          <label className="text-xs font-bold text-slate-500 mb-1.5 block">Số tiền mục tiêu</label>
+                          <input
+                              type="text"
+                              inputMode="numeric"
+                              placeholder="0"
+                              value={piggyGoal}
+                              onChange={(e) => setPiggyGoal(formatNumberInput(e.target.value))}
+                              className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500"
+                          />
+                      </div>
+                      <div>
+                          <label className="text-xs font-bold text-slate-500 mb-1.5 block">Ngày hoàn thành</label>
+                          <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl">
+                              <span className="material-symbols-rounded text-slate-400">calendar_month</span>
+                              <DatePicker
+                                  selected={piggyTargetDate}
+                                  onChange={(date) => date && setPiggyTargetDate(date)}
+                                  dateFormat="dd/MM/yyyy"
+                                  locale={vi}
+                                  minDate={new Date()}
+                                  className="bg-transparent outline-none text-sm font-bold text-slate-700 w-full"
+                              />
+                          </div>
+                      </div>
+                      <div className="grid grid-cols-1 gap-2">
+                          <button
+                              onClick={handleCreatePiggyPlan}
+                              className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl shadow-md shadow-slate-200 active:scale-95 transition-all"
+                          >
+                              Tạo kế hoạch ngẫu nhiên
+                          </button>
+                          {piggyPlan && (
+                              <button
+                                  onClick={() => {
+                                      if (!window.confirm('Tạo lại kế hoạch ngẫu nhiên sẽ reset các ngày đã đánh dấu. Tiếp tục?')) return;
+                                      handleCreatePiggyPlan();
+                                  }}
+                                  className="w-full py-3 bg-white text-slate-700 font-bold rounded-xl border border-slate-200 active:scale-95 transition-all"
+                              >
+                                  Tạo lại ngẫu nhiên
+                              </button>
+                          )}
+                      </div>
+                  </div>
+              </div>
+
+              {piggyPlan && (
+                  <div className="space-y-4">
+                      <div className="bg-white p-5 rounded-[24px] shadow-sm border border-slate-100">
+                          <div className="flex items-start justify-between gap-3">
+                              <div>
+                                  <h3 className="font-bold text-slate-800">Tổng quan</h3>
+                                  <p className="text-xs text-slate-500 mt-1">
+                                      Mục tiêu: <span className="font-bold text-slate-700">{formatCurrency(piggyPlan.goalAmount)}</span> • Hạn: <span className="font-bold text-slate-700">{new Date(piggyPlan.targetDate).toLocaleDateString('vi-VN')}</span>
+                                  </p>
+                              </div>
+                              <div className="text-right">
+                                  <p className="text-[10px] text-slate-400 uppercase font-bold">Đã góp</p>
+                                  <p className="text-sm font-bold text-emerald-600">{formatCurrency(doneTotal)}</p>
+                              </div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 mt-4">
+                              <div className="bg-slate-50 rounded-2xl p-3 border border-slate-100">
+                                  <p className="text-[10px] text-slate-400 uppercase font-bold">Còn lại</p>
+                                  <p className="text-sm font-bold text-slate-800">{formatCurrency(remainingTotal)}</p>
+                              </div>
+                              <div className="bg-slate-50 rounded-2xl p-3 border border-slate-100">
+                                  <p className="text-[10px] text-slate-400 uppercase font-bold">Ngày đã góp</p>
+                                  <p className="text-sm font-bold text-slate-800">{doneDays}/{totalDays}</p>
+                              </div>
+                              <div className="bg-slate-50 rounded-2xl p-3 border border-slate-100">
+                                  <p className="text-[10px] text-slate-400 uppercase font-bold">TB/ngày</p>
+                                  <p className="text-sm font-bold text-slate-800">
+                                      {formatCurrency(totalDays > 0 ? Math.round(piggyPlan.goalAmount / totalDays) : 0)}
+                                  </p>
+                              </div>
+                          </div>
+                      </div>
+
+                      <div className="bg-white p-5 rounded-[24px] shadow-sm border border-slate-100">
+                          <h3 className="font-bold text-slate-800 mb-3">Danh sách ngày</h3>
+                          <div className="space-y-2">
+                              {piggyPlan.days.map(d => {
+                                  const isToday = d.date === todayKey;
+                                  const isPast = d.date < todayKey;
+                                  const bg = d.done
+                                      ? 'bg-emerald-50 border-emerald-100'
+                                      : isToday
+                                          ? 'bg-indigo-50 border-indigo-100'
+                                          : isPast
+                                              ? 'bg-amber-50 border-amber-100'
+                                              : 'bg-white border-slate-100';
+                                  return (
+                                      <div key={d.date} className={`p-3 rounded-2xl border flex items-center justify-between gap-3 ${bg}`}>
+                                          <div className="min-w-0">
+                                              <p className="text-sm font-bold text-slate-800">
+                                                  {parseDateKey(d.date).toLocaleDateString('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit' })}
+                                              </p>
+                                              <p className="text-[11px] text-slate-500">
+                                                  {d.done ? 'Đã góp' : isPast ? 'Quá hạn' : isToday ? 'Hôm nay' : 'Chưa góp'}
+                                              </p>
+                                          </div>
+                                          <div className="text-right flex items-center gap-2">
+                                              <div>
+                                                  <p className="text-[10px] text-slate-400 uppercase font-bold">Số tiền</p>
+                                                  <p className="text-sm font-bold text-slate-800">{formatCurrency(d.amount)}</p>
+                                              </div>
+                                              <button
+                                                  onClick={() => handleTogglePiggyDay(d.date)}
+                                                  className={`px-3 py-2 rounded-xl text-xs font-bold border active:scale-95 transition-all ${
+                                                      d.done
+                                                          ? 'bg-white text-slate-700 border-slate-200'
+                                                          : 'bg-slate-900 text-white border-slate-900'
+                                                  }`}
+                                              >
+                                                  {d.done ? 'Hoàn tác' : 'Đã góp'}
+                                              </button>
+                                          </div>
+                                      </div>
+                                  );
+                              })}
+                          </div>
+                      </div>
+                  </div>
+              )}
+          </div>
+      );
+  };
+
+  const renderGold = () => {
+      const goldTotalPhan = goldState?.totalPhan || 0;
+      const goldUnits = fromTotalPhan(goldTotalPhan);
+      const brandTotalsMap = (goldState?.purchases || []).reduce<Record<string, number>>((acc, p) => {
+          const key = ((p.brand || '').trim() || 'Không rõ');
+          acc[key] = (acc[key] ?? 0) + (p.amount ?? 0);
+          return acc;
+      }, {});
+      const brandTotals = Object.keys(brandTotalsMap)
+          .map(brand => ({ brand, total: brandTotalsMap[brand] ?? 0 }))
+          .sort((a, b) => b.total - a.total);
+
+      return (
+          <div className="pb-32 animate-fade-in pt-4 space-y-6">
+              <div className="flex items-center justify-between mb-1 px-1">
+                  <h2 className="text-2xl font-bold text-slate-800">Vàng đầu tư</h2>
+              </div>
+
               <div className="space-y-4">
                   <div className="bg-white p-5 rounded-[24px] shadow-sm border border-slate-100">
                       <div className="flex items-start justify-between gap-3">
                           <div>
-                              <h3 className="font-bold text-slate-800">Vàng đầu tư</h3>
+                              <h3 className="font-bold text-slate-800">Tổng quan</h3>
                               <p className="text-xs text-slate-500 mt-1">Theo dõi mua/rút riêng biệt</p>
                           </div>
                           <div className="text-right">
@@ -3231,6 +3380,25 @@ export default function App() {
                           </button>
                       </div>
                   </div>
+
+                  {brandTotals.length > 0 && (
+                      <div className="bg-white p-5 rounded-[24px] shadow-sm border border-slate-100">
+                          <div className="flex items-center justify-between mb-3">
+                              <h3 className="font-bold text-slate-800">Theo thương hiệu</h3>
+                              <span className="text-[10px] font-bold text-slate-400 uppercase">
+                                  Tổng tiền mua
+                              </span>
+                          </div>
+                          <div className="space-y-2">
+                              {brandTotals.map(({ brand, total }) => (
+                                  <div key={brand} className="bg-slate-50 border border-slate-100 rounded-2xl p-3 flex items-center justify-between gap-3">
+                                      <p className="text-sm font-bold text-slate-800 truncate">{brand}</p>
+                                      <p className="text-sm font-bold text-amber-700 whitespace-nowrap">{formatCurrency(total)}</p>
+                                  </div>
+                              ))}
+                          </div>
+                      </div>
+                  )}
 
                   <div className="bg-white p-5 rounded-[24px] shadow-sm border border-slate-100">
                       <h4 className="font-bold text-slate-800 mb-3">Mua vàng</h4>
@@ -3439,136 +3607,6 @@ export default function App() {
                       )}
                   </div>
               </div>
-
-              <div className="bg-white p-5 rounded-[24px] shadow-sm border border-slate-100">
-                  <h3 className="font-bold text-slate-800 mb-4">Thiết lập mục tiêu</h3>
-                  <div className="space-y-4">
-                      <div>
-                          <label className="text-xs font-bold text-slate-500 mb-1.5 block">Số tiền mục tiêu</label>
-                          <input
-                              type="text"
-                              inputMode="numeric"
-                              placeholder="0"
-                              value={piggyGoal}
-                              onChange={(e) => setPiggyGoal(formatNumberInput(e.target.value))}
-                              className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500"
-                          />
-                      </div>
-                      <div>
-                          <label className="text-xs font-bold text-slate-500 mb-1.5 block">Ngày hoàn thành</label>
-                          <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl">
-                              <span className="material-symbols-rounded text-slate-400">calendar_month</span>
-                              <DatePicker
-                                  selected={piggyTargetDate}
-                                  onChange={(date) => date && setPiggyTargetDate(date)}
-                                  dateFormat="dd/MM/yyyy"
-                                  locale={vi}
-                                  minDate={new Date()}
-                                  className="bg-transparent outline-none text-sm font-bold text-slate-700 w-full"
-                              />
-                          </div>
-                      </div>
-                      <div className="grid grid-cols-1 gap-2">
-                          <button
-                              onClick={handleCreatePiggyPlan}
-                              className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl shadow-md shadow-slate-200 active:scale-95 transition-all"
-                          >
-                              Tạo kế hoạch ngẫu nhiên
-                          </button>
-                          {piggyPlan && (
-                              <button
-                                  onClick={() => {
-                                      if (!window.confirm('Tạo lại kế hoạch ngẫu nhiên sẽ reset các ngày đã đánh dấu. Tiếp tục?')) return;
-                                      handleCreatePiggyPlan();
-                                  }}
-                                  className="w-full py-3 bg-white text-slate-700 font-bold rounded-xl border border-slate-200 active:scale-95 transition-all"
-                              >
-                                  Tạo lại ngẫu nhiên
-                              </button>
-                          )}
-                      </div>
-                  </div>
-              </div>
-
-              {piggyPlan && (
-                  <div className="space-y-4">
-                      <div className="bg-white p-5 rounded-[24px] shadow-sm border border-slate-100">
-                          <div className="flex items-start justify-between gap-3">
-                              <div>
-                                  <h3 className="font-bold text-slate-800">Tổng quan</h3>
-                                  <p className="text-xs text-slate-500 mt-1">
-                                      Mục tiêu: <span className="font-bold text-slate-700">{formatCurrency(piggyPlan.goalAmount)}</span> • Hạn: <span className="font-bold text-slate-700">{new Date(piggyPlan.targetDate).toLocaleDateString('vi-VN')}</span>
-                                  </p>
-                              </div>
-                              <div className="text-right">
-                                  <p className="text-[10px] text-slate-400 uppercase font-bold">Đã góp</p>
-                                  <p className="text-sm font-bold text-emerald-600">{formatCurrency(doneTotal)}</p>
-                              </div>
-                          </div>
-                          <div className="grid grid-cols-3 gap-2 mt-4">
-                              <div className="bg-slate-50 rounded-2xl p-3 border border-slate-100">
-                                  <p className="text-[10px] text-slate-400 uppercase font-bold">Còn lại</p>
-                                  <p className="text-sm font-bold text-slate-800">{formatCurrency(remainingTotal)}</p>
-                              </div>
-                              <div className="bg-slate-50 rounded-2xl p-3 border border-slate-100">
-                                  <p className="text-[10px] text-slate-400 uppercase font-bold">Ngày đã góp</p>
-                                  <p className="text-sm font-bold text-slate-800">{doneDays}/{totalDays}</p>
-                              </div>
-                              <div className="bg-slate-50 rounded-2xl p-3 border border-slate-100">
-                                  <p className="text-[10px] text-slate-400 uppercase font-bold">TB/ngày</p>
-                                  <p className="text-sm font-bold text-slate-800">
-                                      {formatCurrency(totalDays > 0 ? Math.round(piggyPlan.goalAmount / totalDays) : 0)}
-                                  </p>
-                              </div>
-                          </div>
-                      </div>
-
-                      <div className="bg-white p-5 rounded-[24px] shadow-sm border border-slate-100">
-                          <h3 className="font-bold text-slate-800 mb-3">Danh sách ngày</h3>
-                          <div className="space-y-2">
-                              {piggyPlan.days.map(d => {
-                                  const isToday = d.date === todayKey;
-                                  const isPast = d.date < todayKey;
-                                  const bg = d.done
-                                      ? 'bg-emerald-50 border-emerald-100'
-                                      : isToday
-                                          ? 'bg-indigo-50 border-indigo-100'
-                                          : isPast
-                                              ? 'bg-amber-50 border-amber-100'
-                                              : 'bg-white border-slate-100';
-                                  return (
-                                      <div key={d.date} className={`p-3 rounded-2xl border flex items-center justify-between gap-3 ${bg}`}>
-                                          <div className="min-w-0">
-                                              <p className="text-sm font-bold text-slate-800">
-                                                  {parseDateKey(d.date).toLocaleDateString('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit' })}
-                                              </p>
-                                              <p className="text-[11px] text-slate-500">
-                                                  {d.done ? 'Đã góp' : isPast ? 'Quá hạn' : isToday ? 'Hôm nay' : 'Chưa góp'}
-                                              </p>
-                                          </div>
-                                          <div className="text-right flex items-center gap-2">
-                                              <div>
-                                                  <p className="text-[10px] text-slate-400 uppercase font-bold">Số tiền</p>
-                                                  <p className="text-sm font-bold text-slate-800">{formatCurrency(d.amount)}</p>
-                                              </div>
-                                              <button
-                                                  onClick={() => handleTogglePiggyDay(d.date)}
-                                                  className={`px-3 py-2 rounded-xl text-xs font-bold border active:scale-95 transition-all ${
-                                                      d.done
-                                                          ? 'bg-white text-slate-700 border-slate-200'
-                                                          : 'bg-slate-900 text-white border-slate-900'
-                                                  }`}
-                                              >
-                                                  {d.done ? 'Hoàn tác' : 'Đã góp'}
-                                              </button>
-                                          </div>
-                                      </div>
-                                  );
-                              })}
-                          </div>
-                      </div>
-                  </div>
-              )}
           </div>
       );
   };
@@ -3726,6 +3764,17 @@ export default function App() {
                       {renderPiggy()}
                   </motion.div>
               )}
+              {activeTab === 'gold' && (
+                  <motion.div
+                      key="gold"
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 20 }}
+                      transition={{ duration: 0.2, ease: "easeInOut" }}
+                  >
+                      {renderGold()}
+                  </motion.div>
+              )}
               {activeTab === 'shop' && (
                   <motion.div
                       key="shop"
@@ -3765,6 +3814,14 @@ export default function App() {
                 >
                     <span className={`material-symbols-rounded text-[24px] ${activeTab === 'piggy' ? 'fill-1' : ''}`}>savings</span>
                     <span className="text-[10px] font-bold">Ống heo</span>
+                </button>
+
+                <button 
+                    onClick={() => setActiveTab('gold')}
+                    className={`flex flex-col items-center gap-0.5 p-1.5 rounded-xl transition-all active:scale-95 ${activeTab === 'gold' ? 'text-indigo-600 bg-indigo-50/50' : 'text-slate-400'}`}
+                >
+                    <span className={`material-symbols-rounded text-[24px] ${activeTab === 'gold' ? 'fill-1' : ''}`}>workspace_premium</span>
+                    <span className="text-[10px] font-bold">Vàng</span>
                 </button>
 
                 <button 
