@@ -11,7 +11,6 @@ import DatePicker from 'react-datepicker';
 import { vi } from 'date-fns/locale';
 // @ts-ignore
 import html2canvas from 'html2canvas';
-import { GoldTab, GoldState } from './components/GoldTab';
 
 const formatShortWeekday = (nameOfDay: string) => {
     const name = nameOfDay.toLowerCase();
@@ -25,6 +24,8 @@ const formatShortWeekday = (nameOfDay: string) => {
     return nameOfDay.substring(0, 3);
 };
 
+const GOLD_BRANDS = ['SJC', 'PNJ', 'DOJI', 'Bảo Tín Minh Châu', 'Khác'];
+
 export default function App() {
   // State
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -32,7 +33,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [configError, setConfigError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'home' | 'history' | 'piggy' | 'gold' | 'shop'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'history' | 'piggy' | 'shop'>('home');
   const [historyFilter, setHistoryFilter] = useState<'MEO' | 'ME' | 'BILL'>('MEO');
   
   const [showBill, setShowBill] = useState(false);
@@ -90,11 +91,30 @@ export default function App() {
       days: PiggyDay[];
   };
 
+  type GoldState = {
+      id: string;
+      totalPhan: number;
+      brandTotals?: Record<string, number>; // brand -> totalPhan
+      updatedAt?: string;
+  };
+
   const [piggyGoal, setPiggyGoal] = useState('');
   const [piggyTargetDate, setPiggyTargetDate] = useState<Date>(new Date());
   const [piggyPlan, setPiggyPlan] = useState<PiggyPlan | null>(null);
 
   const [goldState, setGoldState] = useState<GoldState | null>(null);
+  const [goldBuyAmount, setGoldBuyAmount] = useState('');
+  const [goldBuyLuong, setGoldBuyLuong] = useState('');
+  const [goldBuyChi, setGoldBuyChi] = useState('');
+  const [goldBuyPhan, setGoldBuyPhan] = useState('');
+  const [goldBuyBrand, setGoldBuyBrand] = useState('SJC');
+
+  const [goldWithdrawAmount, setGoldWithdrawAmount] = useState('');
+  const [goldWithdrawLuong, setGoldWithdrawLuong] = useState('');
+  const [goldWithdrawChi, setGoldWithdrawChi] = useState('');
+  const [goldWithdrawPhan, setGoldWithdrawPhan] = useState('');
+  const [goldWithdrawBrand, setGoldWithdrawBrand] = useState('SJC');
+  const [showGoldWithdraw, setShowGoldWithdraw] = useState(false);
   
   // Shop State
   const [activeShop, setActiveShop] = useState<string>('elank');
@@ -182,8 +202,7 @@ export default function App() {
                 setGoldState({
                     id: fetchedGoldState.id || 'gold-default',
                     totalPhan: fetchedGoldState.totalPhan,
-                    purchases: Array.isArray(fetchedGoldState.purchases) ? fetchedGoldState.purchases : [],
-                    withdrawals: Array.isArray(fetchedGoldState.withdrawals) ? fetchedGoldState.withdrawals : [],
+                    brandTotals: fetchedGoldState.brandTotals || {},
                     updatedAt: fetchedGoldState.updatedAt
                 });
             } else {
@@ -192,12 +211,11 @@ export default function App() {
                     if (rawGold) {
                         const parsedGold = JSON.parse(rawGold);
                         if (parsedGold && typeof parsedGold.totalPhan === 'number') {
-                            const normalizedGold = {
-                                id: parsedGold.id || 'gold-default',
-                                totalPhan: parsedGold.totalPhan,
-                                purchases: Array.isArray(parsedGold.purchases) ? parsedGold.purchases : [],
-                                withdrawals: Array.isArray(parsedGold.withdrawals) ? parsedGold.withdrawals : [],
-                                updatedAt: parsedGold.updatedAt
+                            const normalizedGold = { 
+                                id: parsedGold.id || 'gold-default', 
+                                totalPhan: parsedGold.totalPhan, 
+                                brandTotals: parsedGold.brandTotals || {},
+                                updatedAt: parsedGold.updatedAt 
                             };
                             setGoldState(normalizedGold);
                             supabaseService.upsertGoldState(normalizedGold).catch(() => {});
@@ -246,28 +264,6 @@ export default function App() {
       }, 800);
       return () => window.clearTimeout(t);
   }, [goldState]);
-
-  useEffect(() => {
-      if (!accounts || accounts.length === 0) return;
-      if (localStorage.getItem('tetSavingSet_2500000_v2') === '1') return;
-
-      const targetBalance = 2500000;
-      const tetAcc = accounts.find(a => a.id === AccountType.TET_SAVING);
-      if (!tetAcc) return;
-      if (tetAcc.balance === targetBalance) {
-          localStorage.setItem('tetSavingSet_2500000_v2', '1');
-          return;
-      }
-
-      supabaseService.updateAccountBalance(AccountType.TET_SAVING, targetBalance)
-          .then(() => {
-              setAccounts(prev => prev.map(acc => acc.id === AccountType.TET_SAVING ? { ...acc, balance: targetBalance } : acc));
-              localStorage.setItem('tetSavingSet_2500000_v2', '1');
-          })
-          .catch((e) => {
-              console.error('Tet saving set 2500000 error', e);
-          });
-  }, [accounts]);
 
   // Derived Values
   const totalBalance = accounts
@@ -898,6 +894,202 @@ export default function App() {
       }
   };
 
+  const parseNonNegativeInt = (raw: string) => {
+      const cleaned = (raw || '').replace(/[^\d]/g, '');
+      const v = parseInt(cleaned || '0', 10);
+      return Number.isFinite(v) && v >= 0 ? v : 0;
+  };
+
+  const normalizeGoldUnits = (luong: number, chi: number, phan: number) => {
+      let p = Math.max(0, phan);
+      let c = Math.max(0, chi);
+      let l = Math.max(0, luong);
+      c += Math.floor(p / 10);
+      p = p % 10;
+      l += Math.floor(c / 10);
+      c = c % 10;
+      return { luong: l, chi: c, phan: p };
+  };
+
+  const toTotalPhan = (luong: number, chi: number, phan: number) => luong * 100 + chi * 10 + phan;
+
+  const fromTotalPhan = (totalPhan: number) => {
+      const safe = Math.max(0, Math.floor(totalPhan || 0));
+      const luong = Math.floor(safe / 100);
+      const chi = Math.floor((safe % 100) / 10);
+      const phan = safe % 10;
+      return { luong, chi, phan };
+  };
+
+  const handleBuyGold = async () => {
+      const amountVal = parseSmartAmount(goldBuyAmount);
+      const luongRaw = parseNonNegativeInt(goldBuyLuong);
+      const chiRaw = parseNonNegativeInt(goldBuyChi);
+      const phanRaw = parseNonNegativeInt(goldBuyPhan);
+      const normalized = normalizeGoldUnits(luongRaw, chiRaw, phanRaw);
+      const totalPhan = toTotalPhan(normalized.luong, normalized.chi, normalized.phan);
+
+      if (amountVal <= 0) {
+          alert('Vui lòng nhập số tiền mua vàng');
+          return;
+      }
+      if (totalPhan <= 0) {
+          alert('Vui lòng nhập số lượng vàng (phân/chỉ/lượng)');
+          return;
+      }
+
+      const mbAcc = accounts.find(a => a.id === AccountType.MB);
+      const tetAcc = accounts.find(a => a.id === AccountType.TET_SAVING);
+      if (!mbAcc || !tetAcc) {
+          alert('Không tìm thấy ví MB Bank hoặc Tiết kiệm ăn Tết');
+          return;
+      }
+      if (tetAcc.balance < amountVal) {
+          alert('Tiết kiệm ăn Tết không đủ để mua vàng');
+          return;
+      }
+      if (mbAcc.balance < amountVal) {
+          alert('Số dư MB Bank không đủ để mua vàng');
+          return;
+      }
+
+      const qtyText = `${normalized.luong} lượng ${normalized.chi} chỉ ${normalized.phan} phân`;
+      const newTx: Transaction = {
+          id: 'gold-buy-' + Date.now().toString(),
+          date: new Date().toISOString(),
+          description: `Mua vàng ${goldBuyBrand} (${qtyText})`,
+          amount: amountVal,
+          accountId: AccountType.TET_SAVING,
+          splitType: SplitType.ME_ONLY,
+          type: TransactionType.EXPENSE,
+          isSettled: true
+      };
+
+      const newTet = tetAcc.balance - amountVal;
+      const newMb = mbAcc.balance - amountVal;
+
+      try {
+          await Promise.all([
+              supabaseService.addTransaction(newTx),
+              supabaseService.updateAccountBalance(AccountType.TET_SAVING, newTet),
+              supabaseService.updateAccountBalance(AccountType.MB, newMb)
+          ]);
+
+          setTransactions(prev => [newTx, ...prev]);
+          setAccounts(prev => prev.map(acc => {
+              if (acc.id === AccountType.TET_SAVING) return { ...acc, balance: newTet };
+              if (acc.id === AccountType.MB) return { ...acc, balance: newMb };
+              return acc;
+          }));
+
+          setGoldState(prev => {
+              const base: GoldState = prev && typeof prev.totalPhan === 'number'
+                  ? prev
+                  : { id: 'gold-default', totalPhan: 0, brandTotals: {} };
+              
+              const currentBrandTotals = base.brandTotals || {};
+              const newBrandTotals = {
+                  ...currentBrandTotals,
+                  [goldBuyBrand]: (currentBrandTotals[goldBuyBrand] || 0) + totalPhan
+              };
+
+              return {
+                  ...base,
+                  id: base.id || 'gold-default',
+                  totalPhan: Math.max(0, (base.totalPhan || 0) + totalPhan),
+                  brandTotals: newBrandTotals,
+                  updatedAt: new Date().toISOString()
+              };
+          });
+
+          setGoldBuyAmount('');
+          setGoldBuyLuong('');
+          setGoldBuyChi('');
+          setGoldBuyPhan('');
+      } catch (e) {
+          console.error('Buy gold error', e);
+          alert('Lỗi khi mua vàng');
+      }
+  };
+
+  const handleWithdrawGold = async () => {
+      const amountVal = parseSmartAmount(goldWithdrawAmount);
+      const luongRaw = parseNonNegativeInt(goldWithdrawLuong);
+      const chiRaw = parseNonNegativeInt(goldWithdrawChi);
+      const phanRaw = parseNonNegativeInt(goldWithdrawPhan);
+      const normalized = normalizeGoldUnits(luongRaw, chiRaw, phanRaw);
+      const totalPhan = toTotalPhan(normalized.luong, normalized.chi, normalized.phan);
+
+      if (totalPhan <= 0) {
+          alert('Vui lòng nhập số lượng vàng rút');
+          return;
+      }
+
+      const currentBrandTotal = (goldState?.brandTotals || {})[goldWithdrawBrand] || 0;
+      if (currentBrandTotal < totalPhan) {
+          alert(`Số lượng vàng ${goldWithdrawBrand} không đủ để rút (Hiện có: ${fromTotalPhan(currentBrandTotal).luong}L ${fromTotalPhan(currentBrandTotal).chi}C ${fromTotalPhan(currentBrandTotal).phan}P)`);
+          return;
+      }
+
+      const mbAcc = accounts.find(a => a.id === AccountType.MB);
+      if (!mbAcc) {
+          alert('Không tìm thấy ví MB Bank');
+          return;
+      }
+
+      const qtyText = `${normalized.luong} lượng ${normalized.chi} chỉ ${normalized.phan} phân`;
+      const newTx: Transaction = {
+          id: 'gold-withdraw-' + Date.now().toString(),
+          date: new Date().toISOString(),
+          description: `Rút vàng ${goldWithdrawBrand} (${qtyText})`,
+          amount: amountVal,
+          accountId: AccountType.MB,
+          splitType: SplitType.ME_ONLY,
+          type: TransactionType.INCOME,
+          isSettled: true
+      };
+
+      const newMb = mbAcc.balance + amountVal;
+
+      try {
+          await Promise.all([
+              supabaseService.addTransaction(newTx),
+              supabaseService.updateAccountBalance(AccountType.MB, newMb)
+          ]);
+
+          setTransactions(prev => [newTx, ...prev]);
+          setAccounts(prev => prev.map(acc => {
+              if (acc.id === AccountType.MB) return { ...acc, balance: newMb };
+              return acc;
+          }));
+
+          setGoldState(prev => {
+              if (!prev) return null;
+              const currentBrandTotals = prev.brandTotals || {};
+              const newBrandTotals = {
+                  ...currentBrandTotals,
+                  [goldWithdrawBrand]: Math.max(0, (currentBrandTotals[goldWithdrawBrand] || 0) - totalPhan)
+              };
+
+              return {
+                  ...prev,
+                  totalPhan: Math.max(0, (prev.totalPhan || 0) - totalPhan),
+                  brandTotals: newBrandTotals,
+                  updatedAt: new Date().toISOString()
+              };
+          });
+
+          setGoldWithdrawAmount('');
+          setGoldWithdrawLuong('');
+          setGoldWithdrawChi('');
+          setGoldWithdrawPhan('');
+          setShowGoldWithdraw(false);
+      } catch (e) {
+          console.error('Withdraw gold error', e);
+          alert('Lỗi khi rút vàng');
+      }
+  };
+
   const handleSettleDebts = async (txIds: string[], finalPayment: number, surplus: number) => {
     const settlementId = 'settle-' + Date.now().toString();
     const newTransactions: Transaction[] = [];
@@ -989,8 +1181,11 @@ export default function App() {
   };
 
   // --- Render (Almost same, just added loading overlay) ---
-  const renderHome = () => (
-    <div className="space-y-6 pb-32 animate-fade-in">
+  const renderHome = () => {
+    const goldTotalPhan = goldState?.totalPhan || 0;
+    const goldUnits = fromTotalPhan(goldTotalPhan);
+    return (
+      <div className="space-y-6 pb-32 animate-fade-in">
       {/* Header Card */}
       <div className="relative overflow-hidden rounded-[32px] bg-gradient-to-br from-[#4F46E5] to-[#7C3AED] p-6 text-white shadow-xl shadow-indigo-200">
          <div className="absolute -top-10 -right-10 w-40 h-40 bg-white opacity-10 rounded-full blur-2xl"></div>
@@ -1285,6 +1480,200 @@ export default function App() {
             {accounts.filter(acc => acc.id !== AccountType.TET_SAVING).map(acc => (
                 <AccountCard key={acc.id} account={acc} onUpdateBalance={handleUpdateBalance} />
             ))}
+        </div>
+
+        {/* Gold Investment Section */}
+        <div className="mt-8">
+            <div className="flex justify-between items-center mb-4 px-1">
+                <h3 className="font-bold text-slate-800 text-lg">Vàng đầu tư</h3>
+                <div className="flex gap-2">
+                    <button 
+                        onClick={() => setShowGoldWithdraw(!showGoldWithdraw)}
+                        className={`text-xs font-bold px-4 py-2 rounded-full flex items-center gap-1 transition-all active:scale-95 ${
+                            showGoldWithdraw ? 'bg-slate-800 text-white' : 'text-amber-600 bg-amber-50 active:bg-amber-100'
+                        }`}
+                    >
+                        <span className="material-symbols-rounded text-lg">{showGoldWithdraw ? 'add' : 'sell'}</span>
+                        {showGoldWithdraw ? 'Mua vàng' : 'Rút vàng'}
+                    </button>
+                </div>
+            </div>
+
+            <div className="bg-white rounded-[32px] p-6 shadow-xl shadow-slate-100 border border-slate-100 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-32 h-32 bg-amber-50 rounded-full -mr-16 -mt-16 opacity-50"></div>
+                
+                <div className="flex justify-between items-start mb-6 relative z-10">
+                    <div>
+                        <p className="text-[10px] text-slate-400 uppercase font-bold tracking-wider mb-1">Tổng tài sản vàng</p>
+                        <h2 className="text-3xl font-black text-amber-600 tracking-tight">
+                            {goldUnits.luong}L {goldUnits.chi}C {goldUnits.phan}P
+                        </h2>
+                    </div>
+                    <div className="p-3 bg-amber-100 text-amber-600 rounded-2xl">
+                        <span className="material-symbols-rounded text-2xl block">payments</span>
+                    </div>
+                </div>
+
+                {/* Brand Totals Breakdown */}
+                {goldState?.brandTotals && Object.keys(goldState.brandTotals).length > 0 && (
+                    <div className="mb-6 flex flex-wrap gap-2">
+                        {Object.entries(goldState.brandTotals).map(([brand, phan]) => {
+                            if (phan <= 0) return null;
+                            const units = fromTotalPhan(phan);
+                            return (
+                                <div key={brand} className="bg-slate-50 border border-slate-100 px-3 py-1.5 rounded-xl text-[10px] font-bold text-slate-600 flex items-center gap-1.5">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                                    {brand}: {units.luong}L {units.chi}C {units.phan}P
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
+
+                {!showGoldWithdraw ? (
+                    <div className="space-y-4 relative z-10">
+                        <div className="grid grid-cols-1 gap-3">
+                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Thương hiệu</label>
+                                <select 
+                                    value={goldBuyBrand} 
+                                    onChange={(e) => setGoldBuyBrand(e.target.value)}
+                                    className="w-full bg-transparent font-bold text-slate-700 outline-none"
+                                >
+                                    {GOLD_BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                            <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Số tiền mua (VND)</label>
+                            <input
+                                type="text"
+                                inputMode="numeric"
+                                placeholder="0"
+                                value={goldBuyAmount}
+                                onChange={(e) => setGoldBuyAmount(formatNumberInput(e.target.value))}
+                                className="w-full bg-transparent text-xl font-bold text-slate-800 outline-none"
+                            />
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-3">
+                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block text-center">Lượng</label>
+                                <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    placeholder="0"
+                                    value={goldBuyLuong}
+                                    onChange={(e) => setGoldBuyLuong(e.target.value.replace(/[^\d]/g, ''))}
+                                    className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
+                                />
+                            </div>
+                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block text-center">Chỉ</label>
+                                <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    placeholder="0"
+                                    value={goldBuyChi}
+                                    onChange={(e) => setGoldBuyChi(e.target.value.replace(/[^\d]/g, ''))}
+                                    className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
+                                />
+                            </div>
+                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block text-center">Phân</label>
+                                <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    placeholder="0"
+                                    value={goldBuyPhan}
+                                    onChange={(e) => setGoldBuyPhan(e.target.value.replace(/[^\d]/g, ''))}
+                                    className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
+                                />
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={handleBuyGold}
+                            className="w-full py-4 bg-amber-500 text-white font-bold rounded-2xl shadow-lg shadow-amber-100 active:scale-95 transition-all flex items-center justify-center gap-2"
+                        >
+                            <span className="material-symbols-rounded">add_circle</span>
+                            Xác nhận mua
+                        </button>
+                    </div>
+                ) : (
+                    <div className="space-y-4 animate-fade-in relative z-10">
+                        <div className="grid grid-cols-1 gap-3">
+                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Thương hiệu rút</label>
+                                <select 
+                                    value={goldWithdrawBrand} 
+                                    onChange={(e) => setGoldWithdrawBrand(e.target.value)}
+                                    className="w-full bg-transparent font-bold text-slate-700 outline-none"
+                                >
+                                    {GOLD_BRANDS.map(b => <option key={b} value={b}>{b}</option>)}
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
+                            <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Số tiền nhận được (VND)</label>
+                            <input
+                                type="text"
+                                inputMode="numeric"
+                                placeholder="0"
+                                value={goldWithdrawAmount}
+                                onChange={(e) => setGoldWithdrawAmount(formatNumberInput(e.target.value))}
+                                className="w-full bg-transparent text-xl font-bold text-slate-800 outline-none"
+                            />
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-3">
+                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block text-center">Lượng</label>
+                                <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    placeholder="0"
+                                    value={goldWithdrawLuong}
+                                    onChange={(e) => setGoldWithdrawLuong(e.target.value.replace(/[^\d]/g, ''))}
+                                    className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
+                                />
+                            </div>
+                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block text-center">Chỉ</label>
+                                <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    placeholder="0"
+                                    value={goldWithdrawChi}
+                                    onChange={(e) => setGoldWithdrawChi(e.target.value.replace(/[^\d]/g, ''))}
+                                    className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
+                                />
+                            </div>
+                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
+                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block text-center">Phân</label>
+                                <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    placeholder="0"
+                                    value={goldWithdrawPhan}
+                                    onChange={(e) => setGoldWithdrawPhan(e.target.value.replace(/[^\d]/g, ''))}
+                                    className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
+                                />
+                            </div>
+                        </div>
+
+                        <button
+                            onClick={handleWithdrawGold}
+                            className="w-full py-4 bg-slate-800 text-white font-bold rounded-2xl shadow-lg shadow-slate-200 active:scale-95 transition-all flex items-center justify-center gap-2"
+                        >
+                            <span className="material-symbols-rounded">sell</span>
+                            Xác nhận rút
+                        </button>
+                    </div>
+                )}
+            </div>
         </div>
       </div>
     </div>
@@ -2562,6 +2951,8 @@ export default function App() {
       const doneDays = piggyPlan ? piggyPlan.days.filter(d => d.done).length : 0;
       const totalDays = piggyPlan ? piggyPlan.days.length : 0;
       const progressPct = piggyPlan && goalAmount > 0 ? Math.min(100, Math.round((doneTotal / goalAmount) * 100)) : 0;
+      const goldTotalPhan = goldState?.totalPhan || 0;
+      const goldUnits = fromTotalPhan(goldTotalPhan);
 
       return (
           <div className="pb-32 animate-fade-in pt-4 space-y-6">
@@ -2899,27 +3290,6 @@ export default function App() {
                       {renderPiggy()}
                   </motion.div>
               )}
-              {activeTab === 'gold' && (
-                  <motion.div
-                      key="gold"
-                      initial={{ opacity: 0, x: 20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: 20 }}
-                      transition={{ duration: 0.2, ease: "easeInOut" }}
-                  >
-                      <GoldTab
-                          goldState={goldState}
-                          setGoldState={setGoldState}
-                          accounts={accounts}
-                          setAccounts={setAccounts}
-                          transactions={transactions}
-                          setTransactions={setTransactions}
-                          formatCurrency={formatCurrency}
-                          parseSmartAmount={parseSmartAmount}
-                          formatNumberInput={formatNumberInput}
-                      />
-                  </motion.div>
-              )}
               {activeTab === 'shop' && (
                   <motion.div
                       key="shop"
@@ -2959,14 +3329,6 @@ export default function App() {
                 >
                     <span className={`material-symbols-rounded text-[24px] ${activeTab === 'piggy' ? 'fill-1' : ''}`}>savings</span>
                     <span className="text-[10px] font-bold">Ống heo</span>
-                </button>
-
-                <button 
-                    onClick={() => setActiveTab('gold')}
-                    className={`flex flex-col items-center gap-0.5 p-1.5 rounded-xl transition-all active:scale-95 ${activeTab === 'gold' ? 'text-indigo-600 bg-indigo-50/50' : 'text-slate-400'}`}
-                >
-                    <span className={`material-symbols-rounded text-[24px] ${activeTab === 'gold' ? 'fill-1' : ''}`}>workspace_premium</span>
-                    <span className="text-[10px] font-bold">Vàng</span>
                 </button>
 
                 <button 
