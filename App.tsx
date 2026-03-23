@@ -278,6 +278,28 @@ export default function App() {
       return () => window.clearTimeout(t);
   }, [goldState]);
 
+  useEffect(() => {
+      if (!accounts || accounts.length === 0) return;
+      if (localStorage.getItem('tetSavingSet_2500000_v1') === '1') return;
+
+      const targetBalance = 2500000;
+      const tetAcc = accounts.find(a => a.id === AccountType.TET_SAVING);
+      if (!tetAcc) return;
+      if (tetAcc.balance === targetBalance) {
+          localStorage.setItem('tetSavingSet_2500000_v1', '1');
+          return;
+      }
+
+      supabaseService.updateAccountBalance(AccountType.TET_SAVING, targetBalance)
+          .then(() => {
+              setAccounts(prev => prev.map(acc => acc.id === AccountType.TET_SAVING ? { ...acc, balance: targetBalance } : acc));
+              localStorage.setItem('tetSavingSet_2500000_v1', '1');
+          })
+          .catch((e) => {
+              console.error('Tet saving set 2500000 error', e);
+          });
+  }, [accounts]);
+
   // Derived Values
   const totalBalance = accounts
     .filter(a => a.id === AccountType.CASH || a.id === AccountType.MB || a.id === AccountType.SAVING || a.id === AccountType.TCB)
