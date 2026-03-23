@@ -1146,19 +1146,21 @@ export default function App() {
     try {
       // 1. Find gold transactions
       const goldTxs = transactions.filter(t => 
-        t.description?.includes("Mua vàng") || t.description?.includes("Rút vàng")
+        t.description?.toLowerCase().includes("vàng")
       );
       
-      // 2. Delete from Supabase
-      for (const tx of goldTxs) {
-        await supabaseService.deleteTransaction(tx.id);
+      // 2. Delete from Supabase in bulk
+      if (goldTxs.length > 0) {
+        await supabaseService.deleteTransactions(goldTxs.map(tx => tx.id));
       }
 
       // 3. Reset Gold State
-      const newGoldState = {
-        ...goldState,
+      const newGoldState: GoldState = {
+        id: goldState?.id || 'gold-default',
         totalPhan: 0,
         brandTotals: {},
+        brandMoneySpent: {},
+        brands: GOLD_BRANDS,
         updatedAt: new Date().toISOString()
       };
       setGoldState(newGoldState);
@@ -1166,7 +1168,7 @@ export default function App() {
 
       // 4. Update local transactions
       setTransactions(prev => prev.filter(t => 
-        !t.description?.includes("Mua vàng") && !t.description?.includes("Rút vàng")
+        !t.description?.toLowerCase().includes("vàng")
       ));
 
       alert("Đã xoá toàn bộ lịch sử vàng.");
@@ -1578,7 +1580,7 @@ export default function App() {
 
     // Filter gold transactions and sort by date ascending (oldest to newest)
     const goldHistory = transactions
-        .filter(t => t.description.includes('vàng'))
+        .filter(t => t.description?.toLowerCase().includes('vàng'))
         .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     return (

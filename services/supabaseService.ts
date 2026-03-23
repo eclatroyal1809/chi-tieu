@@ -131,6 +131,11 @@ export const deleteTransaction = async (id: string) => {
     if (error) throw error;
 };
 
+export const deleteTransactions = async (ids: string[]) => {
+    const { error } = await supabase.from('transactions').delete().in('id', ids);
+    if (error) throw error;
+};
+
 // Hàm xử lý settlement (cập nhật nhiều giao dịch cùng lúc)
 export const updateTransactionsAsSettled = async (txIds: string[], settlementId: string) => {
     const { error } = await supabase.from('transactions')
