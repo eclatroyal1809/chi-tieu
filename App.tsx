@@ -1554,23 +1554,16 @@ export default function App() {
                         setTransferTo(AccountType.TET_SAVING);
                         setShowTransfer(true);
                     }}
-                    className="bg-white/20 hover:bg-white/30 active:scale-95 transition-all p-3 rounded-2xl border border-white/10 flex flex-col items-center justify-center gap-1 min-w-[80px]"
+                    className="w-10 h-10 bg-white/20 hover:bg-white/30 rounded-xl flex items-center justify-center transition-all active:scale-90"
                 >
-                    <span className="material-symbols-rounded text-white block">add_card</span>
-                    <span className="text-[10px] font-bold">Gửi thêm</span>
+                    <span className="material-symbols-rounded text-xl">sync_alt</span>
                 </button>
             </div>
         </div>
-
-        <div className="grid grid-cols-2 gap-3">
-            {accounts.filter(acc => acc.id !== AccountType.TET_SAVING).map(acc => (
-                <AccountCard key={acc.id} account={acc} onUpdateBalance={handleUpdateBalance} />
-            ))}
-        </div>
       </div>
     </div>
-  );
-};
+    );
+  };
 
   const renderGold = () => {
     const goldUnits = fromTotalPhan(goldState?.totalPhan || 0);
@@ -1578,44 +1571,66 @@ export default function App() {
 
     // Filter gold transactions and sort by date ascending (oldest to newest)
     const goldHistory = transactions
-        .filter(t => t.description.includes('vàng'))
+        .filter(t => t.description.toLowerCase().includes('vàng'))
         .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
     return (
-      <div className="pb-32">
-        <div className="bg-indigo-600 pt-12 pb-20 px-6 rounded-b-[40px] relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
-            <div className="absolute bottom-0 left-0 w-48 h-48 bg-indigo-400/20 rounded-full -ml-24 -mb-24 blur-2xl"></div>
+      <div className="pb-32 bg-slate-50/50 min-h-screen">
+        {/* Immersive Header */}
+        <div className="relative pt-16 pb-24 px-6 overflow-hidden">
+            {/* Atmospheric Background Elements */}
+            <div className="absolute inset-0 bg-slate-900"></div>
+            <div className="absolute top-0 right-0 w-80 h-80 bg-amber-500/20 rounded-full blur-[100px] -mr-40 -mt-40"></div>
+            <div className="absolute bottom-0 left-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-[80px] -ml-32 -mb-32"></div>
             
-            <div className="relative z-10">
-                <div className="flex justify-between items-center mb-6">
-                    <h1 className="text-2xl font-black text-white tracking-tight flex items-center gap-2">
-                        <span className="material-symbols-rounded">payments</span>
-                        Đầu tư Vàng
-                    </h1>
+            <div className="relative z-10 max-w-md mx-auto">
+                <div className="flex justify-between items-center mb-8">
+                    <div>
+                        <h1 className="text-2xl font-black text-white tracking-tight flex items-center gap-2">
+                            <span className="material-symbols-rounded text-amber-400">payments</span>
+                            Tài sản Vàng
+                        </h1>
+                        <p className="text-slate-400 text-[10px] font-bold uppercase tracking-[0.2em] mt-1">Gold Investment Portfolio</p>
+                    </div>
                     <button 
                         onClick={handleClearGoldHistory}
-                        className="p-2 bg-white/20 text-white rounded-full active:scale-95 transition-all"
+                        className="w-10 h-10 bg-white/5 hover:bg-white/10 text-slate-300 rounded-2xl flex items-center justify-center transition-all active:scale-90 border border-white/10"
                         title="Xoá lịch sử vàng"
                     >
-                        <span className="material-symbols-rounded">delete_sweep</span>
+                        <span className="material-symbols-rounded text-xl">delete_sweep</span>
                     </button>
                 </div>
 
-                <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-3xl p-6">
-                    <p className="text-indigo-100 text-xs font-bold uppercase tracking-widest mb-1 opacity-80">Tổng tài sản vàng</p>
-                    <div className="flex items-baseline gap-2">
+                <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-[32px] p-8 shadow-2xl relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                        <span className="material-symbols-rounded text-6xl text-white">account_balance_wallet</span>
+                    </div>
+                    
+                    <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.15em] mb-3">Tổng khối lượng sở hữu</p>
+                    <div className="flex items-baseline gap-3">
                         <h2 className="text-4xl font-black text-white tracking-tighter">
-                            {goldUnits.luong}L {goldUnits.chi}C {goldUnits.phan}P
+                            {goldUnits.luong}<span className="text-amber-400 text-xl ml-1">L</span> {goldUnits.chi}<span className="text-amber-400 text-xl ml-1">C</span> {goldUnits.phan}<span className="text-amber-400 text-xl ml-1">P</span>
                         </h2>
+                    </div>
+                    
+                    <div className="mt-6 pt-6 border-t border-white/5 flex justify-between items-center">
+                        <div>
+                            <p className="text-slate-500 text-[9px] font-bold uppercase tracking-widest mb-1">Tổng vốn đầu tư</p>
+                            <p className="text-lg font-black text-slate-200 tracking-tight">
+                                {formatCurrency(Object.values(goldState?.brandMoneySpent || {}).reduce((a, b) => (a as number) + (b as number), 0) as number)}
+                            </p>
+                        </div>
+                        <div className="px-3 py-1 bg-amber-500/10 border border-amber-500/20 rounded-full">
+                            <p className="text-amber-400 text-[9px] font-black uppercase tracking-widest">Active Portfolio</p>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div className="px-6 -mt-10 space-y-6 relative z-10">
-            {/* Brand Summary Cards */}
-            <div className="grid grid-cols-1 gap-4">
+        <div className="px-6 -mt-12 space-y-8 relative z-10 max-w-md mx-auto">
+            {/* Brand Summary Cards - Horizontal Scroll */}
+            <div className="flex gap-4 overflow-x-auto pb-4 no-scrollbar -mx-2 px-2">
                 {goldState?.brandTotals && Object.entries(goldState.brandTotals).map(([brand, phan]) => {
                     const phanNum = phan as number;
                     if (phanNum <= 0) return null;
@@ -1623,200 +1638,187 @@ export default function App() {
                     const moneySpent = (goldState.brandMoneySpent || {})[brand] || 0;
                     
                     return (
-                        <div key={brand} className="bg-white rounded-3xl p-5 shadow-xl shadow-slate-100 border border-slate-100 flex justify-between items-center">
-                            <div>
-                                <h4 className="font-black text-slate-800 text-lg mb-1">{brand}</h4>
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                                    Vốn: <span className="text-indigo-600">{formatCurrency(moneySpent)}</span>
-                                </p>
-                            </div>
-                            <div className="text-right">
-                                <p className="text-xl font-black text-amber-500">
-                                    {units.luong}L {units.chi}C {units.phan}P
-                                </p>
-                                <p className="text-[10px] font-bold text-slate-300 uppercase">Số lượng hiện có</p>
+                        <div key={brand} className="bg-white rounded-[28px] p-5 shadow-xl shadow-slate-200/50 border border-slate-100 min-w-[200px] flex-shrink-0 relative overflow-hidden">
+                            <div className="absolute top-0 right-0 w-16 h-16 bg-slate-50 rounded-full -mr-8 -mt-8 opacity-50"></div>
+                            <h4 className="font-black text-slate-800 text-base mb-4 relative z-10 flex items-center gap-2">
+                                <span className="w-2 h-2 rounded-full bg-amber-500"></span>
+                                {brand}
+                            </h4>
+                            <div className="space-y-3 relative z-10">
+                                <div>
+                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Khối lượng</p>
+                                    <p className="text-lg font-black text-slate-800 tracking-tight">
+                                        {units.luong}L {units.chi}C {units.phan}P
+                                    </p>
+                                </div>
+                                <div className="pt-3 border-t border-slate-50">
+                                    <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-0.5">Vốn đầu tư</p>
+                                    <p className="text-sm font-black text-indigo-600">
+                                        {formatCurrency(moneySpent)}
+                                    </p>
+                                </div>
                             </div>
                         </div>
                     );
                 })}
             </div>
 
-            {/* Action Section */}
-            <div className="bg-white rounded-[32px] p-6 shadow-xl shadow-slate-100 border border-slate-100">
-                <div className="flex p-1 bg-slate-100 rounded-2xl mb-6">
+            {/* Action Section - Modern Card */}
+            <div className="bg-white rounded-[32px] p-8 shadow-2xl shadow-slate-200/60 border border-slate-100">
+                <div className="flex p-1.5 bg-slate-100/80 rounded-2xl mb-8">
                     <button 
                         onClick={() => setShowGoldWithdraw(false)}
-                        className={`flex-1 py-3 rounded-xl font-bold text-sm transition-all ${!showGoldWithdraw ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}
+                        className={`flex-1 py-3.5 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all duration-300 ${!showGoldWithdraw ? 'bg-white text-slate-900 shadow-md scale-[1.02]' : 'text-slate-400 hover:text-slate-600'}`}
                     >
                         Mua vàng
                     </button>
                     <button 
                         onClick={() => setShowGoldWithdraw(true)}
-                        className={`flex-1 py-3 rounded-xl font-bold text-sm transition-all ${showGoldWithdraw ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}
+                        className={`flex-1 py-3.5 rounded-xl font-black text-[11px] uppercase tracking-widest transition-all duration-300 ${showGoldWithdraw ? 'bg-white text-slate-900 shadow-md scale-[1.02]' : 'text-slate-400 hover:text-slate-600'}`}
                     >
                         Bán chốt lãi
                     </button>
                 </div>
 
                 {!showGoldWithdraw ? (
-                    <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-3">
-                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Thương hiệu</label>
-                                <input 
-                                    list="gold-brands-buy"
-                                    value={goldBuyBrand} 
-                                    onChange={(e) => setGoldBuyBrand(e.target.value)}
-                                    placeholder="Nhập hoặc chọn..."
-                                    className="w-full bg-transparent font-bold text-slate-700 outline-none"
-                                />
-                                <datalist id="gold-brands-buy">
-                                    {goldBrands.map(b => <option key={b} value={b} />)}
-                                </datalist>
+                    <div className="space-y-6">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-1.5">
+                                <label className="text-[9px] text-slate-400 font-black uppercase tracking-widest ml-1">Thương hiệu</label>
+                                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100 focus-within:border-indigo-200 focus-within:bg-white transition-all">
+                                    <input 
+                                        list="gold-brands-buy"
+                                        value={goldBuyBrand} 
+                                        onChange={(e) => setGoldBuyBrand(e.target.value)}
+                                        placeholder="Nhập..."
+                                        className="w-full bg-transparent font-bold text-slate-800 outline-none text-sm placeholder:text-slate-300"
+                                    />
+                                    <datalist id="gold-brands-buy">
+                                        {goldBrands.map(b => <option key={b} value={b} />)}
+                                    </datalist>
+                                </div>
                             </div>
-                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Ngày mua</label>
-                                <DatePicker
-                                    selected={goldBuyDate}
-                                    onChange={(date: Date | null) => date && setGoldBuyDate(date)}
-                                    dateFormat="dd/MM/yyyy"
-                                    locale={vi}
-                                    className="w-full bg-transparent font-bold text-slate-700 outline-none"
-                                />
+                            <div className="space-y-1.5">
+                                <label className="text-[9px] text-slate-400 font-black uppercase tracking-widest ml-1">Ngày mua</label>
+                                <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100 focus-within:border-indigo-200 focus-within:bg-white transition-all">
+                                    <DatePicker
+                                        selected={goldBuyDate}
+                                        onChange={(date: Date | null) => date && setGoldBuyDate(date)}
+                                        dateFormat="dd/MM/yyyy"
+                                        locale={vi}
+                                        className="w-full bg-transparent font-bold text-slate-800 outline-none text-sm"
+                                    />
+                                </div>
                             </div>
                         </div>
 
-                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                            <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Số tiền mua (VND)</label>
-                            <input
-                                type="text"
-                                inputMode="numeric"
-                                placeholder="0"
-                                value={goldBuyAmount}
-                                onChange={(e) => setGoldBuyAmount(formatNumberInput(e.target.value))}
-                                className="w-full bg-transparent text-xl font-bold text-slate-800 outline-none"
-                            />
+                        <div className="space-y-1.5">
+                            <label className="text-[9px] text-slate-400 font-black uppercase tracking-widest ml-1">Số tiền đầu tư (VND)</label>
+                            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 focus-within:border-indigo-200 focus-within:bg-white transition-all">
+                                <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    placeholder="0"
+                                    value={goldBuyAmount}
+                                    onChange={(e) => setGoldBuyAmount(formatNumberInput(e.target.value))}
+                                    className="w-full bg-transparent text-2xl font-black text-slate-900 outline-none placeholder:text-slate-200 tracking-tight"
+                                />
+                            </div>
                         </div>
 
                         <div className="grid grid-cols-3 gap-3">
-                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block text-center">Lượng</label>
-                                <input
-                                    type="text"
-                                    inputMode="numeric"
-                                    placeholder="0"
-                                    value={goldBuyLuong}
-                                    onChange={(e) => setGoldBuyLuong(e.target.value.replace(/[^\d]/g, ''))}
-                                    className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
-                                />
-                            </div>
-                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block text-center">Chỉ</label>
-                                <input
-                                    type="text"
-                                    inputMode="numeric"
-                                    placeholder="0"
-                                    value={goldBuyChi}
-                                    onChange={(e) => setGoldBuyChi(e.target.value.replace(/[^\d]/g, ''))}
-                                    className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
-                                />
-                            </div>
-                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block text-center">Phân</label>
-                                <input
-                                    type="text"
-                                    inputMode="numeric"
-                                    placeholder="0"
-                                    value={goldBuyPhan}
-                                    onChange={(e) => setGoldBuyPhan(e.target.value.replace(/[^\d]/g, ''))}
-                                    className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
-                                />
-                            </div>
+                            {[
+                                { label: 'Lượng', value: goldBuyLuong, setter: setGoldBuyLuong },
+                                { label: 'Chỉ', value: goldBuyChi, setter: setGoldBuyChi },
+                                { label: 'Phân', value: goldBuyPhan, setter: setGoldBuyPhan }
+                            ].map((item) => (
+                                <div key={item.label} className="space-y-1.5">
+                                    <label className="text-[9px] text-slate-400 font-black uppercase tracking-widest text-center block">{item.label}</label>
+                                    <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100 focus-within:border-indigo-200 focus-within:bg-white transition-all">
+                                        <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            placeholder="0"
+                                            value={item.value}
+                                            onChange={(e) => item.setter(e.target.value.replace(/[^\d]/g, ''))}
+                                            className="w-full bg-transparent text-center font-black text-slate-900 outline-none text-lg"
+                                        />
+                                    </div>
+                                </div>
+                            ))}
                         </div>
 
-                        <div className="p-3 bg-amber-50 rounded-2xl border border-amber-100">
-                            <p className="text-[10px] text-amber-700 font-bold leading-relaxed">
-                                <span className="material-symbols-rounded text-xs align-middle mr-1">info</span>
+                        <div className="p-4 bg-amber-50/50 rounded-2xl border border-amber-100/50 flex gap-3 items-start">
+                            <span className="material-symbols-rounded text-amber-500 text-lg mt-0.5">info</span>
+                            <p className="text-[10px] text-amber-800 font-bold leading-relaxed">
                                 {goldBuyDate < new Date(2026, 2, 21) 
-                                    ? "Mua trước 21/03/2026: Không trừ vào Tiết kiệm ăn Tết & MB Bank." 
-                                    : "Mua từ 21/03/2026: Sẽ trừ vào Tiết kiệm ăn Tết & MB Bank."}
+                                    ? "Giao dịch trước 21/03/2026 sẽ được ghi nhận vào kho vàng nhưng không trừ số dư các ví hiện tại." 
+                                    : "Giao dịch từ 21/03/2026 sẽ tự động trừ số dư đồng thời tại Tiết kiệm ăn Tết & MB Bank."}
                             </p>
                         </div>
 
                         <button
                             onClick={handleBuyGold}
-                            className="w-full py-4 bg-indigo-600 text-white font-bold rounded-2xl shadow-lg shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-2"
+                            className="w-full py-5 bg-slate-900 text-white font-black rounded-2xl shadow-xl shadow-slate-200 active:scale-[0.98] transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-xs"
                         >
-                            <span className="material-symbols-rounded">add_circle</span>
-                            Xác nhận mua
+                            <span className="material-symbols-rounded">add_task</span>
+                            Xác nhận mua vàng
                         </button>
                     </div>
                 ) : (
-                    <div className="space-y-4 animate-fade-in">
-                        <div className="grid grid-cols-1 gap-3">
-                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Thương hiệu bán</label>
+                    <div className="space-y-6 animate-fade-in">
+                        <div className="space-y-1.5">
+                            <label className="text-[9px] text-slate-400 font-black uppercase tracking-widest ml-1">Thương hiệu bán</label>
+                            <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100 focus-within:border-indigo-200 focus-within:bg-white transition-all">
                                 <select 
                                     value={goldWithdrawBrand} 
                                     onChange={(e) => setGoldWithdrawBrand(e.target.value)}
-                                    className="w-full bg-transparent font-bold text-slate-700 outline-none"
+                                    className="w-full bg-transparent font-bold text-slate-800 outline-none text-sm"
                                 >
                                     {goldBrands.map(b => <option key={b} value={b}>{b}</option>)}
                                 </select>
                             </div>
                         </div>
 
-                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                            <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Số tiền nhận được (VND)</label>
-                            <input
-                                type="text"
-                                inputMode="numeric"
-                                placeholder="0"
-                                value={goldWithdrawAmount}
-                                onChange={(e) => setGoldWithdrawAmount(formatNumberInput(e.target.value))}
-                                className="w-full bg-transparent text-xl font-bold text-slate-800 outline-none"
-                            />
+                        <div className="space-y-1.5">
+                            <label className="text-[9px] text-slate-400 font-black uppercase tracking-widest ml-1">Số tiền nhận được (VND)</label>
+                            <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100 focus-within:border-indigo-200 focus-within:bg-white transition-all">
+                                <input
+                                    type="text"
+                                    inputMode="numeric"
+                                    placeholder="0"
+                                    value={goldWithdrawAmount}
+                                    onChange={(e) => setGoldWithdrawAmount(formatNumberInput(e.target.value))}
+                                    className="w-full bg-transparent text-2xl font-black text-slate-900 outline-none tracking-tight"
+                                />
+                            </div>
                         </div>
 
                         <div className="grid grid-cols-3 gap-3">
-                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block text-center">Lượng</label>
-                                <input
-                                    type="text"
-                                    inputMode="numeric"
-                                    placeholder="0"
-                                    value={goldWithdrawLuong}
-                                    onChange={(e) => setGoldWithdrawLuong(e.target.value.replace(/[^\d]/g, ''))}
-                                    className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
-                                />
-                            </div>
-                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block text-center">Chỉ</label>
-                                <input
-                                    type="text"
-                                    inputMode="numeric"
-                                    placeholder="0"
-                                    value={goldWithdrawChi}
-                                    onChange={(e) => setGoldWithdrawChi(e.target.value.replace(/[^\d]/g, ''))}
-                                    className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
-                                />
-                            </div>
-                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block text-center">Phân</label>
-                                <input
-                                    type="text"
-                                    inputMode="numeric"
-                                    placeholder="0"
-                                    value={goldWithdrawPhan}
-                                    onChange={(e) => setGoldWithdrawPhan(e.target.value.replace(/[^\d]/g, ''))}
-                                    className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
-                                />
-                            </div>
+                            {[
+                                { label: 'Lượng', value: goldWithdrawLuong, setter: setGoldWithdrawLuong },
+                                { label: 'Chỉ', value: goldWithdrawChi, setter: setGoldWithdrawChi },
+                                { label: 'Phân', value: goldWithdrawPhan, setter: setGoldWithdrawPhan }
+                            ].map((item) => (
+                                <div key={item.label} className="space-y-1.5">
+                                    <label className="text-[9px] text-slate-400 font-black uppercase tracking-widest text-center block">{item.label}</label>
+                                    <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100 focus-within:border-indigo-200 focus-within:bg-white transition-all">
+                                        <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            placeholder="0"
+                                            value={item.value}
+                                            onChange={(e) => item.setter(e.target.value.replace(/[^\d]/g, ''))}
+                                            className="w-full bg-transparent text-center font-black text-slate-900 outline-none text-lg"
+                                        />
+                                    </div>
+                                </div>
+                            ))}
                         </div>
 
                         <button
                             onClick={handleWithdrawGold}
-                            className="w-full py-4 bg-slate-800 text-white font-bold rounded-2xl shadow-lg shadow-slate-200 active:scale-95 transition-all flex items-center justify-center gap-2"
+                            className="w-full py-5 bg-amber-500 text-white font-black rounded-2xl shadow-xl shadow-amber-100 active:scale-[0.98] transition-all flex items-center justify-center gap-3 uppercase tracking-widest text-xs"
                         >
                             <span className="material-symbols-rounded">sell</span>
                             Xác nhận bán chốt lãi
@@ -1825,44 +1827,59 @@ export default function App() {
                 )}
             </div>
 
-            {/* Gold History Section */}
-            <div className="bg-white rounded-[32px] p-6 shadow-xl shadow-slate-100 border border-slate-100">
-                <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-2">
-                    <span className="material-symbols-rounded text-indigo-600">history</span>
-                    Lịch sử đầu tư (Cũ → Mới)
-                </h3>
+            {/* Gold History Section - Timeline Style */}
+            <div className="bg-white rounded-[32px] p-8 shadow-xl shadow-slate-200/50 border border-slate-100">
+                <div className="flex justify-between items-center mb-8">
+                    <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                        <span className="material-symbols-rounded text-indigo-600">timeline</span>
+                        Lịch sử đầu tư
+                    </h3>
+                    <div className="px-3 py-1 bg-slate-100 rounded-full">
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Cũ → Mới</p>
+                    </div>
+                </div>
                 
-                <div className="space-y-4">
+                <div className="space-y-8 relative">
                     {goldHistory.length === 0 ? (
-                        <p className="text-center text-slate-400 py-8 font-bold text-sm italic">Chưa có giao dịch vàng nào</p>
-                    ) : (
-                        goldHistory.map((t, idx) => (
-                            <div key={t.id} className="flex gap-4 items-start relative">
-                                {idx !== goldHistory.length - 1 && (
-                                    <div className="absolute left-[19px] top-10 bottom-[-16px] w-0.5 bg-slate-100"></div>
-                                )}
-                                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 z-10 ${
-                                    t.type === TransactionType.EXPENSE ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'
-                                }`}>
-                                    <span className="material-symbols-rounded text-xl">
-                                        {t.type === TransactionType.EXPENSE ? 'add_shopping_cart' : 'sell'}
-                                    </span>
-                                </div>
-                                <div className="flex-1 pt-1">
-                                    <div className="flex justify-between items-start mb-0.5">
-                                        <p className="font-bold text-slate-800 text-sm leading-snug">{t.description}</p>
-                                        <p className={`font-black text-sm ${
-                                            t.type === TransactionType.EXPENSE ? 'text-rose-500' : 'text-emerald-500'
-                                        }`}>
-                                            {t.type === TransactionType.EXPENSE ? '-' : '+'}{formatCurrency(t.amount)}
-                                        </p>
-                                    </div>
-                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                                        {new Date(t.date).toLocaleDateString('vi-VN')}
-                                    </p>
-                                </div>
+                        <div className="text-center py-12">
+                            <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <span className="material-symbols-rounded text-slate-200 text-3xl">history_toggle_off</span>
                             </div>
-                        ))
+                            <p className="text-slate-400 font-bold text-sm italic">Chưa có dữ liệu giao dịch</p>
+                        </div>
+                    ) : (
+                        <div className="relative">
+                            <div className="absolute left-[19px] top-4 bottom-4 w-0.5 bg-slate-100"></div>
+                            <div className="space-y-8">
+                                {goldHistory.map((t) => (
+                                    <div key={t.id} className="flex gap-6 items-start relative group">
+                                        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 z-10 shadow-sm transition-transform group-hover:scale-110 ${
+                                            t.type === TransactionType.EXPENSE ? 'bg-amber-500 text-white' : 'bg-slate-900 text-white'
+                                        }`}>
+                                            <span className="material-symbols-rounded text-xl">
+                                                {t.type === TransactionType.EXPENSE ? 'add_shopping_cart' : 'sell'}
+                                            </span>
+                                        </div>
+                                        <div className="flex-1 pt-1">
+                                            <div className="flex justify-between items-start mb-1">
+                                                <p className="font-black text-slate-800 text-sm leading-tight group-hover:text-indigo-600 transition-colors">{t.description}</p>
+                                                <p className={`font-black text-sm tracking-tight ${
+                                                    t.type === TransactionType.EXPENSE ? 'text-rose-500' : 'text-emerald-500'
+                                                }`}>
+                                                    {t.type === TransactionType.EXPENSE ? '-' : '+'}{formatCurrency(t.amount)}
+                                                </p>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <span className="material-symbols-rounded text-[14px] text-slate-300">calendar_today</span>
+                                                <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">
+                                                    {new Date(t.date).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
                     )}
                 </div>
             </div>
