@@ -89,9 +89,21 @@ export default function App() {
       days: PiggyDay[];
   };
 
+  type GoldState = {
+      id: string;
+      totalPhan: number;
+      updatedAt?: string;
+  };
+
   const [piggyGoal, setPiggyGoal] = useState('');
   const [piggyTargetDate, setPiggyTargetDate] = useState<Date>(new Date());
   const [piggyPlan, setPiggyPlan] = useState<PiggyPlan | null>(null);
+
+  const [goldState, setGoldState] = useState<GoldState | null>(null);
+  const [goldBuyAmount, setGoldBuyAmount] = useState('');
+  const [goldBuyLuong, setGoldBuyLuong] = useState('');
+  const [goldBuyChi, setGoldBuyChi] = useState('');
+  const [goldBuyPhan, setGoldBuyPhan] = useState('');
   
   // Shop State
   const [activeShop, setActiveShop] = useState<string>('elank');
@@ -141,13 +153,14 @@ export default function App() {
             await supabaseService.ensureTetSavingExists(INITIAL_ACCOUNTS);
             
             // Fetch data concurrently
-            const [fetchedAccounts, fetchedTransactions, fetchedShopProducts, fetchedShopOrders, fetchedShopFinances, fetchedPiggyPlan] = await Promise.all([
+            const [fetchedAccounts, fetchedTransactions, fetchedShopProducts, fetchedShopOrders, fetchedShopFinances, fetchedPiggyPlan, fetchedGoldState] = await Promise.all([
                 supabaseService.getAccounts(),
                 supabaseService.getTransactions(),
                 supabaseService.getShopProducts(),
                 supabaseService.getShopOrders(),
                 supabaseService.getShopFinances(),
-                supabaseService.getPiggyPlan().catch(() => null)
+                supabaseService.getPiggyPlan().catch(() => null),
+                supabaseService.getGoldState().catch(() => null)
             ]);
 
             setAccounts(fetchedAccounts);
@@ -169,6 +182,26 @@ export default function App() {
                             if (typeof parsed.goalAmount === 'number') setPiggyGoal(formatNumberInput(String(parsed.goalAmount)));
                             if (typeof parsed.targetDate === 'string') setPiggyTargetDate(new Date(parsed.targetDate));
                             supabaseService.upsertPiggyPlan(parsed).catch(() => {});
+                        }
+                    }
+                } catch (e) {}
+            }
+
+            if (fetchedGoldState && typeof fetchedGoldState.totalPhan === 'number') {
+                setGoldState({
+                    id: fetchedGoldState.id || 'gold-default',
+                    totalPhan: fetchedGoldState.totalPhan,
+                    updatedAt: fetchedGoldState.updatedAt
+                });
+            } else {
+                try {
+                    const rawGold = localStorage.getItem('goldState_v1');
+                    if (rawGold) {
+                        const parsedGold = JSON.parse(rawGold);
+                        if (parsedGold && typeof parsedGold.totalPhan === 'number') {
+                            const normalizedGold = { id: parsedGold.id || 'gold-default', totalPhan: parsedGold.totalPhan, updatedAt: parsedGold.updatedAt };
+                            setGoldState(normalizedGold);
+                            supabaseService.upsertGoldState(normalizedGold).catch(() => {});
                         }
                     }
                 } catch (e) {}
@@ -199,6 +232,21 @@ export default function App() {
       }, 800);
       return () => window.clearTimeout(t);
   }, [piggyPlan]);
+
+  useEffect(() => {
+      try {
+          if (!goldState) {
+              localStorage.removeItem('goldState_v1');
+              return;
+          }
+          localStorage.setItem('goldState_v1', JSON.stringify(goldState));
+      } catch (e) {}
+      if (!goldState) return;
+      const t = window.setTimeout(() => {
+          supabaseService.upsertGoldState(goldState).catch(() => {});
+      }, 800);
+      return () => window.clearTimeout(t);
+  }, [goldState]);
 
   // Derived Values
   const totalBalance = accounts
@@ -826,6 +874,116 @@ export default function App() {
       } catch (e) {
           console.error('Piggy transfer error', e);
           alert('Lỗi khi chuyển tiền Ống heo');
+      }
+  };
+
+  const parseNonNegativeInt = (raw: string) => {
+      const cleaned = (raw || '').replace(/[^\d]/g, '');
+      const v = parseInt(cleaned || '0', 10);
+      return Number.isFinite(v) && v >= 0 ? v : 0;
+  };
+
+  const normalizeGoldUnits = (luong: number, chi: number, phan: number) => {
+      let p = Math.max(0, phan);
+      let c = Math.max(0, chi);
+      let l = Math.max(0, luong);
+      c += Math.floor(p / 10);
+      p = p % 10;
+      l += Math.floor(c / 10);
+      c = c % 10;
+      return { luong: l, chi: c, phan: p };
+  };
+
+  const toTotalPhan = (luong: number, chi: number, phan: number) => luong * 100 + chi * 10 + phan;
+
+  const fromTotalPhan = (totalPhan: number) => {
+      const safe = Math.max(0, Math.floor(totalPhan || 0));
+      const luong = Math.floor(safe / 100);
+      const chi = Math.floor((safe % 100) / 10);
+      const phan = safe % 10;
+      return { luong, chi, phan };
+  };
+
+  const handleBuyGold = async () => {
+      const amountVal = parseSmartAmount(goldBuyAmount);
+      const luongRaw = parseNonNegativeInt(goldBuyLuong);
+      const chiRaw = parseNonNegativeInt(goldBuyChi);
+      const phanRaw = parseNonNegativeInt(goldBuyPhan);
+      const normalized = normalizeGoldUnits(luongRaw, chiRaw, phanRaw);
+      const totalPhan = toTotalPhan(normalized.luong, normalized.chi, normalized.phan);
+
+      if (amountVal <= 0) {
+          alert('Vui lòng nhập số tiền mua vàng');
+          return;
+      }
+      if (totalPhan <= 0) {
+          alert('Vui lòng nhập số lượng vàng (phân/chỉ/lượng)');
+          return;
+      }
+
+      const mbAcc = accounts.find(a => a.id === AccountType.MB);
+      const tetAcc = accounts.find(a => a.id === AccountType.TET_SAVING);
+      if (!mbAcc || !tetAcc) {
+          alert('Không tìm thấy ví MB Bank hoặc Tiết kiệm ăn Tết');
+          return;
+      }
+      if (tetAcc.balance < amountVal) {
+          alert('Tiết kiệm ăn Tết không đủ để mua vàng');
+          return;
+      }
+      if (mbAcc.balance < amountVal) {
+          alert('Số dư MB Bank không đủ để mua vàng');
+          return;
+      }
+
+      const qtyText = `${normalized.luong} lượng ${normalized.chi} chỉ ${normalized.phan} phân`;
+      const newTx: Transaction = {
+          id: 'gold-buy-' + Date.now().toString(),
+          date: new Date().toISOString(),
+          description: `Mua vàng đầu tư (${qtyText})`,
+          amount: amountVal,
+          accountId: AccountType.TET_SAVING,
+          splitType: SplitType.ME_ONLY,
+          type: TransactionType.EXPENSE,
+          isSettled: true
+      };
+
+      const newTet = tetAcc.balance - amountVal;
+      const newMb = mbAcc.balance - amountVal;
+
+      try {
+          await Promise.all([
+              supabaseService.addTransaction(newTx),
+              supabaseService.updateAccountBalance(AccountType.TET_SAVING, newTet),
+              supabaseService.updateAccountBalance(AccountType.MB, newMb)
+          ]);
+
+          setTransactions(prev => [newTx, ...prev]);
+          setAccounts(prev => prev.map(acc => {
+              if (acc.id === AccountType.TET_SAVING) return { ...acc, balance: newTet };
+              if (acc.id === AccountType.MB) return { ...acc, balance: newMb };
+              return acc;
+          }));
+
+          setGoldState(prev => {
+              const base: GoldState = prev && typeof prev.totalPhan === 'number'
+                  ? prev
+                  : { id: 'gold-default', totalPhan: 0 };
+              return {
+                  ...base,
+                  id: base.id || 'gold-default',
+                  totalPhan: Math.max(0, (base.totalPhan || 0) + totalPhan),
+                  updatedAt: new Date().toISOString()
+              };
+          });
+
+          setGoldBuyAmount('');
+          setGoldBuyLuong('');
+          setGoldBuyChi('');
+          setGoldBuyPhan('');
+      } catch (e) {
+          console.error('Buy gold error', e);
+          alert('Lỗi khi mua vàng');
       }
   };
 
@@ -2493,6 +2651,8 @@ export default function App() {
       const doneDays = piggyPlan ? piggyPlan.days.filter(d => d.done).length : 0;
       const totalDays = piggyPlan ? piggyPlan.days.length : 0;
       const progressPct = piggyPlan && goalAmount > 0 ? Math.min(100, Math.round((doneTotal / goalAmount) * 100)) : 0;
+      const goldTotalPhan = goldState?.totalPhan || 0;
+      const goldUnits = fromTotalPhan(goldTotalPhan);
 
       return (
           <div className="pb-32 animate-fade-in pt-4 space-y-6">
@@ -2541,6 +2701,62 @@ export default function App() {
                               </div>
                           </div>
                       )}
+                  </div>
+              </div>
+
+              <div className="bg-white p-5 rounded-[24px] shadow-sm border border-slate-100">
+                  <div className="flex items-start justify-between gap-3 mb-4">
+                      <div>
+                          <h3 className="font-bold text-slate-800">Vàng đầu tư</h3>
+                          <p className="text-xs text-slate-500 mt-1">Trừ thẳng Tiết kiệm ăn Tết và cộng dồn số lượng vàng</p>
+                      </div>
+                      <div className="text-right">
+                          <p className="text-[10px] text-slate-400 uppercase font-bold">Đã mua</p>
+                          <p className="text-sm font-bold text-slate-800">{goldUnits.luong} lượng {goldUnits.chi} chỉ {goldUnits.phan} phân</p>
+                      </div>
+                  </div>
+
+                  <div className="space-y-3">
+                      <input
+                          type="text"
+                          inputMode="numeric"
+                          placeholder="Số tiền mua (VND)"
+                          value={goldBuyAmount}
+                          onChange={(e) => setGoldBuyAmount(formatNumberInput(e.target.value))}
+                          className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500 font-bold"
+                      />
+                      <div className="grid grid-cols-3 gap-3">
+                          <input
+                              type="text"
+                              inputMode="numeric"
+                              placeholder="Lượng"
+                              value={goldBuyLuong}
+                              onChange={(e) => setGoldBuyLuong(e.target.value.replace(/[^\d]/g, ''))}
+                              className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500 font-bold"
+                          />
+                          <input
+                              type="text"
+                              inputMode="numeric"
+                              placeholder="Chỉ"
+                              value={goldBuyChi}
+                              onChange={(e) => setGoldBuyChi(e.target.value.replace(/[^\d]/g, ''))}
+                              className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500 font-bold"
+                          />
+                          <input
+                              type="text"
+                              inputMode="numeric"
+                              placeholder="Phân"
+                              value={goldBuyPhan}
+                              onChange={(e) => setGoldBuyPhan(e.target.value.replace(/[^\d]/g, ''))}
+                              className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500 font-bold"
+                          />
+                      </div>
+                      <button
+                          onClick={handleBuyGold}
+                          className="w-full py-3 bg-amber-500 text-white font-bold rounded-xl shadow-md shadow-amber-100 active:scale-95 transition-all"
+                      >
+                          Mua vàng
+                      </button>
                   </div>
               </div>
 

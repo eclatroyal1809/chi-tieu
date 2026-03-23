@@ -358,3 +358,23 @@ export const deletePiggyPlan = async (id: string) => {
     const { error } = await supabase.from('piggy_plans').delete().eq('id', id);
     if (error) throw error;
 };
+
+export const getGoldState = async (): Promise<any | null> => {
+    const { data, error } = await supabase
+        .from('gold_states')
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .limit(1);
+    if (error) throw error;
+    const row = data && data[0];
+    return row ? row.state : null;
+};
+
+export const upsertGoldState = async (state: any) => {
+    const { error } = await supabase.from('gold_states').upsert({
+        id: state.id,
+        state,
+        updated_at: new Date().toISOString()
+    });
+    if (error) throw error;
+};
