@@ -1100,36 +1100,6 @@ export default function App() {
           });
   }, [goldState, accounts, transactions]);
 
-  useEffect(() => {
-      if (!accounts || accounts.length === 0) return;
-      if (localStorage.getItem('goldFix_20260323_v1') === '1') return;
-      if (localStorage.getItem('goldRefund_1650000_v1') === '1') return;
-
-      const mbAcc = accounts.find(a => a.id === AccountType.MB);
-      const tetAcc = accounts.find(a => a.id === AccountType.TET_SAVING);
-      if (!mbAcc || !tetAcc) return;
-
-      const amountVal = 1650000;
-      const newTet = tetAcc.balance + amountVal;
-      const newMb = mbAcc.balance + amountVal;
-
-      Promise.all([
-          supabaseService.updateAccountBalance(AccountType.TET_SAVING, newTet),
-          supabaseService.updateAccountBalance(AccountType.MB, newMb)
-      ])
-          .then(() => {
-              setAccounts(prev => prev.map(acc => {
-                  if (acc.id === AccountType.TET_SAVING) return { ...acc, balance: newTet };
-                  if (acc.id === AccountType.MB) return { ...acc, balance: newMb };
-                  return acc;
-              }));
-              localStorage.setItem('goldRefund_1650000_v1', '1');
-          })
-          .catch((e) => {
-              console.error('Gold refund 1650000 error', e);
-          });
-  }, [accounts]);
-
   const handleBuyGold = async () => {
       const amountVal = parseSmartAmount(goldBuyAmount);
       const luongRaw = parseNonNegativeInt(goldBuyLuong);
