@@ -1090,6 +1090,42 @@ export default function App() {
       }
   };
 
+  const handleClearGoldHistory = async () => {
+    if (!window.confirm("Bạn có chắc chắn muốn xoá toàn bộ lịch sử mua/rút vàng và đặt lại số dư vàng về 0? Hành động này không thể hoàn tác.")) return;
+
+    try {
+      // 1. Find gold transactions
+      const goldTxs = transactions.filter(t => 
+        t.description?.includes("Mua vàng") || t.description?.includes("Rút vàng")
+      );
+      
+      // 2. Delete from Supabase
+      for (const tx of goldTxs) {
+        await supabaseService.deleteTransaction(tx.id);
+      }
+
+      // 3. Reset Gold State
+      const newGoldState = {
+        ...goldState,
+        totalPhan: 0,
+        brandTotals: {},
+        updatedAt: new Date().toISOString()
+      };
+      setGoldState(newGoldState);
+      await supabaseService.upsertGoldState(newGoldState);
+
+      // 4. Update local transactions
+      setTransactions(prev => prev.filter(t => 
+        !t.description?.includes("Mua vàng") && !t.description?.includes("Rút vàng")
+      ));
+
+      alert("Đã xoá toàn bộ lịch sử vàng.");
+    } catch (e) {
+      console.error("Clear gold history error", e);
+      alert("Lỗi khi xoá lịch sử vàng.");
+    }
+  };
+
   const handleSettleDebts = async (txIds: string[], finalPayment: number, surplus: number) => {
     const settlementId = 'settle-' + Date.now().toString();
     const newTransactions: Transaction[] = [];
@@ -1488,6 +1524,13 @@ export default function App() {
                 <h3 className="font-bold text-slate-800 text-lg">Vàng đầu tư</h3>
                 <div className="flex gap-2">
                     <button 
+                        onClick={handleClearGoldHistory}
+                        className="text-xs font-bold px-3 py-2 rounded-full text-rose-500 bg-rose-50 active:bg-rose-100 transition-all active:scale-95 flex items-center gap-1"
+                        title="Xoá lịch sử vàng"
+                    >
+                        <span className="material-symbols-rounded text-lg">delete_sweep</span>
+                    </button>
+                    <button 
                         onClick={() => setShowGoldWithdraw(!showGoldWithdraw)}
                         className={`text-xs font-bold px-4 py-2 rounded-full flex items-center gap-1 transition-all active:scale-95 ${
                             showGoldWithdraw ? 'bg-slate-800 text-white' : 'text-amber-600 bg-amber-50 active:bg-amber-100'
@@ -1518,8 +1561,9 @@ export default function App() {
                 {goldState?.brandTotals && Object.keys(goldState.brandTotals).length > 0 && (
                     <div className="mb-6 flex flex-wrap gap-2">
                         {Object.entries(goldState.brandTotals).map(([brand, phan]) => {
-                            if (phan <= 0) return null;
-                            const units = fromTotalPhan(phan);
+                            const phanNum = phan as number;
+                            if (phanNum <= 0) return null;
+                            const units = fromTotalPhan(phanNum);
                             return (
                                 <div key={brand} className="bg-slate-50 border border-slate-100 px-3 py-1.5 rounded-xl text-[10px] font-bold text-slate-600 flex items-center gap-1.5">
                                     <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
@@ -1678,6 +1722,7 @@ export default function App() {
       </div>
     </div>
   );
+};
 
   const renderHistory = () => {
       const filteredTransactions = transactions.filter(t => {
