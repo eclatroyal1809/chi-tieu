@@ -1407,7 +1407,7 @@ export default function App() {
              </div>
 
              <div className="mb-5">
-                 <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                 <div className="grid grid-cols-3 gap-2">
                      {[AccountType.MB, AccountType.TCB, AccountType.CASH].map(type => {
                          const acc = accounts.find(a => a.id === type);
                          if(!acc) return null;
@@ -1416,14 +1416,14 @@ export default function App() {
                             <button
                                 key={acc.id}
                                 onClick={() => setQaAccount(acc.id as AccountType)}
-                                className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold border transition-all whitespace-nowrap active:scale-95 ${
+                                className={`flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl text-[11px] font-black border transition-all active:scale-95 ${
                                     isSelected 
                                     ? `bg-slate-800 text-white border-slate-800 shadow-md shadow-slate-200` 
                                     : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
                                 }`}
                             >
-                                <div className={`w-2 h-2 rounded-full ${isSelected ? 'bg-white' : acc.color}`}></div>
-                                {acc.name}
+                                <div className={`w-2 h-2 rounded-full shrink-0 ${isSelected ? 'bg-white' : acc.color}`}></div>
+                                <span className="truncate">{acc.name}</span>
                             </button>
                          );
                      })}
@@ -1886,7 +1886,6 @@ export default function App() {
               );
           }
           if (historyFilter === 'MEO') {
-              // Hiển thị cả Thu nhập do Mèo đóng (INCOME + MEO_PAID)
               return (
                   (t.splitType === SplitType.SHARED || t.splitType === SplitType.MEO_ONLY || t.splitType === SplitType.MEO_PAID) 
                   && t.type !== TransactionType.SETTLEMENT
@@ -1904,134 +1903,162 @@ export default function App() {
           return new Date(b.split('/').reverse().join('-')).getTime() - new Date(a.split('/').reverse().join('-')).getTime();
       });
 
+      const totalIn = filteredTransactions
+        .filter(t => t.type === TransactionType.INCOME || t.splitType === SplitType.MEO_PAID || t.type === TransactionType.SETTLEMENT)
+        .reduce((sum, t) => sum + (t.splitType === SplitType.SHARED ? t.amount / 2 : t.amount), 0);
+      
+      const totalOut = filteredTransactions
+        .filter(t => t.type === TransactionType.EXPENSE && t.splitType !== SplitType.MEO_PAID)
+        .reduce((sum, t) => sum + (t.splitType === SplitType.SHARED ? t.amount / 2 : t.amount), 0);
+
       return (
-        <div className="pb-32 animate-fade-in">
-            <div className="flex items-center justify-between mb-6 px-1">
-                <h2 className="text-2xl font-bold text-slate-800">Lịch sử</h2>
+        <div className="pb-32 animate-fade-in pt-4">
+            <div className="flex items-center justify-between mb-8 px-1">
+                <div>
+                    <h2 className="text-2xl font-black text-slate-800 tracking-tight">Lịch sử</h2>
+                    <p className="text-sm font-bold text-slate-400 uppercase tracking-wider">Dòng tiền & Đối soát</p>
+                </div>
                 
-                <div className="flex bg-slate-200 p-1 rounded-xl">
+                <div className="flex bg-slate-100 p-1 rounded-2xl relative">
                     {['MEO', 'ME', 'BILL'].map((filter) => (
                         <button 
                             key={filter}
                             onClick={() => setHistoryFilter(filter as any)}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                                historyFilter === filter ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'
+                            className={`px-4 py-2 rounded-xl text-xs font-black transition-all relative z-10 ${
+                                historyFilter === filter ? 'text-indigo-600' : 'text-slate-400'
                             }`}
                         >
                             {filter === 'MEO' ? 'Mèo' : filter === 'ME' ? 'Tôi' : 'Bill'}
+                            {historyFilter === filter && (
+                                <motion.div 
+                                    layoutId="history-filter-bg"
+                                    className="absolute inset-0 bg-white shadow-sm rounded-xl -z-10 border border-slate-200/50"
+                                />
+                            )}
                         </button>
                     ))}
                 </div>
             </div>
+
+            <div className="grid grid-cols-2 gap-4 mb-8">
+                <div className="bg-emerald-50/50 border border-emerald-100 p-4 rounded-[24px]">
+                    <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-1">Tổng thu</p>
+                    <p className="text-lg font-black text-emerald-700">{formatShortCurrency(totalIn)}</p>
+                </div>
+                <div className="bg-rose-50/50 border border-rose-100 p-4 rounded-[24px]">
+                    <p className="text-[10px] font-black text-rose-600 uppercase tracking-widest mb-1">Tổng chi</p>
+                    <p className="text-lg font-black text-rose-700">{formatShortCurrency(totalOut)}</p>
+                </div>
+            </div>
             
             {sortedDates.length === 0 ? (
-                 <div className="flex flex-col items-center justify-center py-20 text-slate-400">
-                    <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mb-4">
-                        <span className="material-symbols-rounded text-4xl text-slate-300">
-                            {historyFilter === 'BILL' ? 'receipt_long' : 'history'}
+                 <div className="flex flex-col items-center justify-center py-24 text-center">
+                    <div className="w-24 h-24 bg-slate-50 text-slate-200 rounded-[32px] flex items-center justify-center mb-6 border border-slate-100">
+                        <span className="material-symbols-rounded text-5xl">
+                            {historyFilter === 'BILL' ? 'receipt_long' : 'history_toggle_off'}
                         </span>
                     </div>
-                    <p className="font-medium">Chưa có giao dịch</p>
+                    <h3 className="text-lg font-bold text-slate-800 mb-2">Trống trơn</h3>
+                    <p className="text-slate-400 text-sm max-w-[200px]">Chưa có giao dịch nào hiển thị ở đây cả</p>
                 </div>
             ) : (
-                <div className="space-y-6">
+                <div className="space-y-10">
                     {sortedDates.map(date => (
-                        <div key={date}>
-                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 px-1">{date}</h4>
-                            <div className="bg-white rounded-[24px] shadow-sm border border-slate-100 overflow-hidden">
-                                {groupedTxs[date].map((t, index) => {
+                        <div key={date} className="relative">
+                            <div className="flex items-center gap-3 mb-4 px-1">
+                                <div className="h-[1px] flex-1 bg-slate-100"></div>
+                                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{date}</h4>
+                                <div className="h-[1px] flex-1 bg-slate-100"></div>
+                            </div>
+
+                            <div className="bg-white rounded-[32px] shadow-sm border border-slate-100 overflow-hidden divide-y divide-slate-50">
+                                {groupedTxs[date].map((t) => {
                                     const isMeoPaid = t.splitType === SplitType.MEO_PAID;
                                     const isTransfer = t.type === TransactionType.TRANSFER;
                                     const isSettlement = t.type === TransactionType.SETTLEMENT;
                                     const isShared = t.splitType === SplitType.SHARED;
                                     const isIncome = t.type === TransactionType.INCOME;
-                                    const isLast = index === groupedTxs[date].length - 1;
-                                    
                                     const displayAmount = isShared ? t.amount / 2 : t.amount;
 
                                     return (
-                                        <div key={t.id} className={`p-4 flex items-center gap-4 active:bg-slate-50 transition-colors ${!isLast ? 'border-b border-slate-50' : ''}`}>
-                                            {/* Icon Box */}
+                                        <div key={t.id} className="p-4 flex items-center gap-4 active:bg-slate-50/80 transition-colors group">
                                             <div 
                                                 onClick={() => isSettlement && handleViewBill(t)}
-                                                className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
-                                                isSettlement ? 'bg-purple-100 text-purple-600' :
-                                                isMeoPaid || (isIncome && isMeoPaid) ? 'bg-emerald-100 text-emerald-600' :
-                                                isIncome ? 'bg-emerald-100 text-emerald-600' :
-                                                isTransfer ? 'bg-indigo-50 text-indigo-600' :
-                                                'bg-slate-100 text-slate-500'
+                                                className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border-2 ${
+                                                isSettlement ? 'bg-purple-50 text-purple-600 border-purple-100' :
+                                                isMeoPaid || (isIncome && isMeoPaid) ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
+                                                isIncome ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
+                                                isTransfer ? 'bg-indigo-50 text-indigo-600 border-indigo-100' :
+                                                'bg-slate-50 text-slate-500 border-slate-100'
                                             }`}>
                                                 <span className="material-symbols-rounded text-xl">
-                                                    {isSettlement ? 'receipt' : 
-                                                     isMeoPaid ? 'price_check' : 
-                                                     isIncome ? 'trending_up' :
-                                                     isTransfer ? 'swap_horiz' : 'shopping_bag'}
+                                                    {isSettlement ? 'receipt' : isMeoPaid ? 'price_check' : isIncome ? 'trending_up' : isTransfer ? 'swap_horiz' : 'shopping_bag'}
                                                 </span>
                                             </div>
 
-                                            {/* Content */}
                                             <div className="flex-1 min-w-0" onClick={() => isSettlement && handleViewBill(t)}>
-                                                <h5 className="font-bold text-slate-800 text-sm truncate">{t.description}</h5>
-                                                <div className="flex items-center gap-1.5 mt-1">
-                                                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-bold truncate max-w-[80px]">
-                                                        {accounts.find(a => a.id === t.accountId)?.name}
-                                                        {isTransfer && ` → ${accounts.find(a => a.id === t.toAccountId)?.name}`}
-                                                     </span>
+                                                <div className="flex items-center gap-1.5 mb-1">
+                                                    <h5 className="font-extrabold text-slate-800 text-sm truncate">{t.description}</h5>
+                                                    {t.isSettled && !isSettlement && <span className="material-symbols-rounded text-[14px] text-indigo-400">verified</span>}
+                                                </div>
+                                                
+                                                <div className="flex items-center flex-wrap gap-1.5">
+                                                     <div className="flex items-center gap-1 bg-slate-100/80 px-2 py-0.5 rounded-lg">
+                                                         <span className="material-symbols-rounded text-[12px] text-slate-400">account_balance_wallet</span>
+                                                         <span className="text-[10px] text-slate-500 font-bold truncate max-w-[70px]">
+                                                            {accounts.find(a => a.id === t.accountId)?.name}
+                                                         </span>
+                                                     </div>
+
+                                                     {isTransfer && (
+                                                         <div className="flex items-center gap-1 bg-indigo-50 px-2 py-0.5 rounded-lg text-indigo-600">
+                                                             <span className="material-symbols-rounded text-[14px]">arrow_forward</span>
+                                                             <span className="text-[10px] font-bold truncate max-w-[70px]">
+                                                                {accounts.find(a => a.id === t.toAccountId)?.name}
+                                                             </span>
+                                                         </div>
+                                                     )}
+
                                                      {!isTransfer && !isSettlement && !isIncome && (
-                                                         <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                                                             t.splitType === 'ME_ONLY' ? 'bg-slate-100 text-slate-500' :
+                                                         <span className={`text-[10px] px-2 py-0.5 rounded-lg font-black uppercase tracking-tight ${
+                                                             t.splitType === 'ME_ONLY' ? 'bg-slate-100 text-slate-400' :
                                                              isMeoPaid ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-600'
                                                          }`}>
                                                              {SPLIT_OPTIONS.find(o => o.id === t.splitType)?.label}
                                                          </span>
                                                      )}
-                                                     {isIncome && (
-                                                        <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-emerald-100 text-emerald-700">
-                                                            {isMeoPaid ? 'Mèo đóng quỹ' : 'Thu nhập'}
+
+                                                     {isIncome && !isMeoPaid && (
+                                                        <span className="text-[10px] px-2 py-0.5 rounded-lg font-black uppercase tracking-tight bg-emerald-100 text-emerald-700">
+                                                            Thu nhập
                                                         </span>
                                                      )}
                                                 </div>
                                             </div>
 
-                                            {/* Amount */}
-                                            <div className="flex items-center gap-3">
-                                                <div className="text-right">
-                                                    <p className={`font-bold text-sm ${
-                                                        isSettlement ? 'text-purple-600' :
-                                                        isMeoPaid || isIncome ? 'text-emerald-600' :
-                                                        isTransfer ? 'text-slate-600' : 'text-slate-800'
-                                                    }`}>
-                                                        {isMeoPaid || isSettlement || isIncome ? '+' : isTransfer ? '' : '-'}{formatShortCurrency(displayAmount)}
-                                                    </p>
-                                                </div>
+                                            <div className="flex flex-col items-end gap-2 shrink-0">
+                                                <p className={`font-black text-sm whitespace-nowrap ${
+                                                    isSettlement ? 'text-purple-600' : isMeoPaid || isIncome ? 'text-emerald-600' : isTransfer ? 'text-slate-600' : 'text-slate-900'
+                                                }`}>
+                                                    {isMeoPaid || isSettlement || isIncome ? '+' : isTransfer ? '' : '-'}{formatShortCurrency(displayAmount)}
+                                                </p>
                                                 
-                                                {/* Edit & Delete Buttons */}
-                                                {!t.isSettled || t.type === TransactionType.SETTLEMENT || (t.type === TransactionType.INCOME && t.splitType === SplitType.MEO_PAID) ? (
-                                                    <div className="flex items-center gap-1">
-                                                        <button 
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                handleEditTransaction(t);
-                                                            }}
-                                                            className="w-8 h-8 rounded-full flex items-center justify-center text-slate-300 hover:text-blue-500 hover:bg-blue-50 transition-all active:scale-90"
-                                                        >
-                                                            <span className="material-symbols-rounded text-lg">edit</span>
-                                                        </button>
-                                                        <button 
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                handleDeleteTransaction(t.id);
-                                                            }}
-                                                            className="w-8 h-8 rounded-full flex items-center justify-center text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-all active:scale-90"
-                                                        >
-                                                            <span className="material-symbols-rounded text-lg">delete</span>
-                                                        </button>
-                                                    </div>
-                                                ) : (
-                                                    <div className="w-8 h-8 flex items-center justify-center text-slate-200">
-                                                        <span className="material-symbols-rounded text-lg">lock</span>
-                                                    </div>
-                                                )}
+                                                <div className="flex items-center gap-0.5">
+                                                    {!t.isSettled || t.type === TransactionType.SETTLEMENT || (t.type === TransactionType.INCOME && t.splitType === SplitType.MEO_PAID) ? (
+                                                        <>
+                                                            <button onClick={(e) => { e.stopPropagation(); handleEditTransaction(t); }} className="w-7 h-7 rounded-full flex items-center justify-center text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 transition-all active:scale-90">
+                                                                <span className="material-symbols-rounded text-lg">edit_square</span>
+                                                            </button>
+                                                            <button onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(t.id); }} className="w-7 h-7 rounded-full flex items-center justify-center text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-all active:scale-90">
+                                                                <span className="material-symbols-rounded text-lg">delete</span>
+                                                            </button>
+                                                        </>
+                                                    ) : (
+                                                        <div className="w-7 h-7 flex items-center justify-center text-slate-200" title="Đã đối soát">
+                                                            <span className="material-symbols-rounded text-base">lock</span>
+                                                        </div>
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
                                     );
@@ -2140,7 +2167,7 @@ export default function App() {
       };
 
       return (
-          <div className="space-y-6 animate-fade-in pb-10">
+          <div className="space-y-6 animate-fade-in pb-32">
               <div className="bg-white p-5 sm:p-6 rounded-[32px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50">
                   <div className="flex items-center gap-2 mb-5">
                       <div className="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-500">
@@ -2566,13 +2593,17 @@ export default function App() {
                                   <span className="material-symbols-rounded text-[18px]">storefront</span>
                                   Kênh bán hàng
                               </label>
-                              <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                              <div className="grid grid-cols-2 gap-2">
                                   {['Shopee', 'Facebook', 'Instagram', 'Zalo'].map(c => (
-                                      <button key={c} onClick={() => setOrdForm({
-                                          ...ordForm,
-                                          channel: c,
-                                          ...(c === 'Shopee' ? { deposit: '', phone: '', address: '' } : {})
-                                      })} className={`px-5 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all flex items-center justify-center min-w-[90px] sm:min-w-[100px] ${ordForm.channel === c ? 'bg-slate-800 text-white shadow-lg shadow-slate-200/50 scale-100' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50 scale-95 opacity-80'}`}>
+                                      <button 
+                                          key={c} 
+                                          onClick={() => setOrdForm({
+                                              ...ordForm,
+                                              channel: c,
+                                              ...(c === 'Shopee' ? { deposit: '', phone: '', address: '' } : {})
+                                          })} 
+                                          className={`py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center ${ordForm.channel === c ? 'bg-slate-800 text-white shadow-lg shadow-slate-200/50' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`}
+                                      >
                                           {c}
                                       </button>
                                   ))}
@@ -3507,7 +3538,7 @@ export default function App() {
                       <div className="bg-white p-5 rounded-[24px] shadow-sm border border-slate-100">
                           <h3 className="font-bold text-slate-800 mb-3">Danh sách ngày</h3>
                           <div className="space-y-2">
-                              {piggyPlan.days.map(d => {
+                              {piggyPlan.days.slice().sort((a, b) => (a.done === b.done ? 0 : a.done ? 1 : -1)).map(d => {
                                   const isToday = d.date === todayKey;
                                   const isPast = d.date < todayKey;
                                   const bg = d.done
@@ -3620,33 +3651,110 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900 selection:bg-indigo-100">
       <main className="max-w-md mx-auto min-h-screen relative bg-[#F8FAFC] shadow-2xl overflow-hidden pb-safe">
-        {isLoading && (
-            <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-50 flex items-center justify-center">
-                <div className="flex flex-col items-center gap-3">
-                    <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
-                    <p className="text-sm font-bold text-indigo-600 animate-pulse">Đang đồng bộ...</p>
-                </div>
-            </div>
-        )}
+        <AnimatePresence>
+            {isLoading && (
+                <motion.div 
+                    initial={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.5 }}
+                    className="fixed inset-0 bg-white z-[100] flex flex-col items-center justify-center p-8 overflow-hidden"
+                >
+                    {/* Background decorative elements */}
+                    <div className="absolute top-[-10%] right-[-10%] w-64 h-64 bg-indigo-50 rounded-full blur-3xl opacity-60"></div>
+                    <div className="absolute bottom-[-10%] left-[-10%] w-64 h-64 bg-rose-50 rounded-full blur-3xl opacity-60"></div>
+                    
+                    <div className="relative flex flex-col items-center">
+                        <motion.div
+                            animate={{ 
+                                scale: [1, 1.1, 1],
+                                rotate: [0, 5, -5, 0]
+                            }}
+                            transition={{ 
+                                duration: 3,
+                                repeat: Infinity,
+                                ease: "easeInOut"
+                            }}
+                            className="w-24 h-24 bg-gradient-to-tr from-indigo-600 to-indigo-400 rounded-[32px] flex items-center justify-center shadow-2xl shadow-indigo-200 mb-8"
+                        >
+                            <span className="material-symbols-rounded text-5xl text-white fill-1">savings</span>
+                        </motion.div>
+                        
+                        <motion.h1 
+                            initial={{ y: 20, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            transition={{ delay: 0.2 }}
+                            className="text-2xl font-black text-slate-800 tracking-tight mb-2"
+                        >
+                            Mèo Finance
+                        </motion.h1>
+                        
+                        <motion.p 
+                            initial={{ y: 20, opacity: 0 }}
+                            animate={{ y: 0, opacity: 1 }}
+                            transition={{ delay: 0.3 }}
+                            className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-12"
+                        >
+                            Quản lý tài chính thông minh
+                        </motion.p>
+                        
+                        <motion.div 
+                            initial={{ scale: 0.8, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            transition={{ delay: 0.5 }}
+                            className="flex flex-col items-center gap-4"
+                        >
+                            <div className="w-48 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                <motion.div 
+                                    initial={{ width: "0%" }}
+                                    animate={{ width: "100%" }}
+                                    transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
+                                    className="h-full bg-indigo-600 rounded-full"
+                                />
+                            </div>
+                            <p className="text-xs font-bold text-indigo-600 animate-pulse tracking-wide uppercase">Đang đồng bộ dữ liệu...</p>
+                        </motion.div>
+                    </div>
+                    
+                    <div className="absolute bottom-12 text-slate-300 font-bold text-[10px] tracking-[4px] uppercase">
+                        Version 2.0 • Elank Studio
+                    </div>
+                </motion.div>
+            )}
+        </AnimatePresence>
         
         {/* Error State Overlay */}
         {configError && !isLoading && (
-             <div className="absolute inset-0 bg-white/95 backdrop-blur-md z-50 flex items-center justify-center p-6 text-center">
-                <div className="max-w-xs">
-                    <div className="w-16 h-16 bg-rose-100 text-rose-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <span className="material-symbols-rounded text-3xl">cloud_off</span>
-                    </div>
-                    <h3 className="font-bold text-slate-800 text-lg mb-2">Chưa cấu hình Cloud</h3>
-                    <p className="text-slate-500 text-sm mb-6">{configError}</p>
-                    <div className="bg-slate-100 p-3 rounded-lg text-xs font-mono text-left mb-6 overflow-x-auto text-slate-600">
+             <motion.div 
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="fixed inset-0 bg-white z-[110] flex flex-col items-center justify-center p-8 text-center"
+             >
+                <div className="w-20 h-20 bg-rose-50 text-rose-500 rounded-[24px] flex items-center justify-center mb-6 border border-rose-100">
+                    <span className="material-symbols-rounded text-4xl">cloud_off</span>
+                </div>
+                
+                <h3 className="text-xl font-black text-slate-800 mb-2">Lỗi kết nối</h3>
+                <p className="text-slate-500 text-sm mb-8 leading-relaxed">{configError}</p>
+                
+                <div className="w-full bg-slate-50 p-4 rounded-2xl border border-slate-100 text-left mb-8">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Tệp yêu cầu kiểm tra</p>
+                    <div className="font-mono text-xs text-indigo-600 bg-white p-3 rounded-xl border border-slate-100 shadow-sm overflow-x-auto">
                         supabaseClient.ts
                     </div>
-                    <p className="text-xs text-slate-400">Vui lòng cập nhật URL và Key trong code.</p>
                 </div>
-            </div>
+                
+                <p className="text-xs text-slate-400 font-medium">Vui lòng cập nhật URL và Key trong code để tiếp tục.</p>
+                
+                <button 
+                    onClick={() => window.location.reload()}
+                    className="mt-8 px-8 py-3 bg-slate-900 text-white font-bold rounded-full text-sm active:scale-95 transition-all shadow-xl shadow-slate-200"
+                >
+                    Thử lại ngay
+                </button>
+             </motion.div>
         )}
 
-        <div className="px-4 pt-safe relative">
+        <div className="px-4 pt-safe relative min-h-screen">
           <AnimatePresence mode="wait">
               {activeTab === 'home' && (
                   <motion.div
@@ -3706,47 +3814,58 @@ export default function App() {
           </AnimatePresence>
         </div>
 
-        {/* Docked Bottom Nav */}
-        <div className="fixed bottom-0 left-0 right-0 z-40 pb-safe bg-white/95 backdrop-blur-xl border-t border-slate-200/50 shadow-[0_-8px_30px_rgba(0,0,0,0.04)]">
-            <div className="flex justify-around items-center px-2 py-2 max-w-md mx-auto">
+        {/* Floating Bottom Nav */}
+        <div className="fixed bottom-6 left-0 right-0 z-40 px-4 pointer-events-none">
+            <div className="bg-white/90 backdrop-blur-2xl px-6 py-3 rounded-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-slate-200/50 max-w-sm mx-auto flex justify-between items-center pointer-events-auto relative overflow-hidden">
+                {/* Subtle top gloss */}
+                <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-slate-200 to-transparent"></div>
+                
                 <button 
                     onClick={() => setActiveTab('home')}
-                    className={`flex flex-col items-center gap-1 w-[20%] py-1 transition-all active:scale-95 ${activeTab === 'home' ? 'text-indigo-600' : 'text-slate-400'}`}
+                    className={`flex-1 flex flex-col items-center justify-center transition-all active:scale-95 duration-300 ${activeTab === 'home' ? 'text-indigo-600' : 'text-slate-400'}`}
                 >
-                    <span className={`material-symbols-rounded text-[26px] ${activeTab === 'home' ? 'fill-1' : ''}`}>home</span>
-                    <span className="text-[11px] font-bold">Trang chủ</span>
+                    <span className={`material-symbols-rounded text-[28px] ${activeTab === 'home' ? 'fill-1' : ''}`}>home</span>
+                    <div className="h-1.5 flex items-center justify-center mt-1">
+                        {activeTab === 'home' && <motion.div layoutId="nav-dot" className="w-1.5 h-1.5 bg-indigo-600 rounded-full" />}
+                    </div>
                 </button>
 
                 <button 
                     onClick={() => setActiveTab('history')}
-                    className={`flex flex-col items-center gap-1 w-[20%] py-1 transition-all active:scale-95 ${activeTab === 'history' ? 'text-indigo-600' : 'text-slate-400'}`}
+                    className={`flex-1 flex flex-col items-center justify-center transition-all active:scale-95 duration-300 ${activeTab === 'history' ? 'text-indigo-600' : 'text-slate-400'}`}
                 >
-                    <span className={`material-symbols-rounded text-[26px] ${activeTab === 'history' ? 'fill-1' : ''}`}>calendar_month</span>
-                    <span className="text-[11px] font-bold">Lịch sử</span>
+                    <span className={`material-symbols-rounded text-[28px] ${activeTab === 'history' ? 'fill-1' : ''}`}>calendar_month</span>
+                    <div className="h-1.5 flex items-center justify-center mt-1">
+                        {activeTab === 'history' && <motion.div layoutId="nav-dot" className="w-1.5 h-1.5 bg-indigo-600 rounded-full" />}
+                    </div>
+                </button>
+
+                {/* Centered Large Button */}
+                <button 
+                    onClick={() => setActiveTab('shop')}
+                    className={`flex-none flex flex-col items-center justify-center w-14 h-14 rounded-full transition-all active:scale-90 shadow-lg -mt-2 -mb-2 border-4 border-white ${activeTab === 'shop' ? 'bg-indigo-600 text-white shadow-indigo-200' : 'bg-slate-100 text-slate-400 shadow-slate-100'}`}
+                >
+                    <span className={`material-symbols-rounded text-[30px] ${activeTab === 'shop' ? 'fill-1' : ''}`}>storefront</span>
                 </button>
 
                 <button 
                     onClick={() => setActiveTab('piggy')}
-                    className={`flex flex-col items-center gap-1 w-[20%] py-1 transition-all active:scale-95 ${activeTab === 'piggy' ? 'text-indigo-600' : 'text-slate-400'}`}
+                    className={`flex-1 flex flex-col items-center justify-center transition-all active:scale-95 duration-300 ${activeTab === 'piggy' ? 'text-indigo-600' : 'text-slate-400'}`}
                 >
-                    <span className={`material-symbols-rounded text-[26px] ${activeTab === 'piggy' ? 'fill-1' : ''}`}>savings</span>
-                    <span className="text-[11px] font-bold">Ống heo</span>
-                </button>
-
-                <button 
-                    onClick={() => setActiveTab('shop')}
-                    className={`flex flex-col items-center gap-1 w-[20%] py-1 transition-all active:scale-95 ${activeTab === 'shop' ? 'text-indigo-600' : 'text-slate-400'}`}
-                >
-                    <span className={`material-symbols-rounded text-[26px] ${activeTab === 'shop' ? 'fill-1' : ''}`}>storefront</span>
-                    <span className="text-[11px] font-bold">Cửa hàng</span>
+                    <span className={`material-symbols-rounded text-[28px] ${activeTab === 'piggy' ? 'fill-1' : ''}`}>savings</span>
+                    <div className="h-1.5 flex items-center justify-center mt-1">
+                        {activeTab === 'piggy' && <motion.div layoutId="nav-dot" className="w-1.5 h-1.5 bg-indigo-600 rounded-full" />}
+                    </div>
                 </button>
 
                 <button 
                     onClick={() => setActiveTab('gold')}
-                    className={`flex flex-col items-center gap-1 w-[20%] py-1 transition-all active:scale-95 ${activeTab === 'gold' ? 'text-indigo-600' : 'text-slate-400'}`}
+                    className={`flex-1 flex flex-col items-center justify-center transition-all active:scale-95 duration-300 ${activeTab === 'gold' ? 'text-indigo-600' : 'text-slate-400'}`}
                 >
-                    <span className={`material-symbols-rounded text-[26px] ${activeTab === 'gold' ? 'fill-1' : ''}`}>payments</span>
-                    <span className="text-[11px] font-bold">Vàng</span>
+                    <span className={`material-symbols-rounded text-[28px] ${activeTab === 'gold' ? 'fill-1' : ''}`}>payments</span>
+                    <div className="h-1.5 flex items-center justify-center mt-1">
+                        {activeTab === 'gold' && <motion.div layoutId="nav-dot" className="w-1.5 h-1.5 bg-indigo-600 rounded-full" />}
+                    </div>
                 </button>
             </div>
         </div>
