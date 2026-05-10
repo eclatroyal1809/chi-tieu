@@ -2193,10 +2193,33 @@ export default function App() {
               const p = products.find(pp => pp.id === item.productId);
               if (!p) return alert('Không tìm thấy sản phẩm thành phần');
               const needed = (parseInt(item.qty) || 1) * pQty;
-              if (p.stock < needed) return alert(`Sản phẩm [${p.name}] không đủ tồn kho (Cần ${needed}, Hiện có ${p.stock})`);
               
-              totalCostPerUnit += (Number(p.originalPrice) || 0) * (parseInt(item.qty) || 1);
-              updates.push({ id: p.id, oldStock: p.stock, used: needed, name: p.name });
+              const pName = p.name.trim().toLowerCase();
+              const lots = products.filter(pp => pp.name.trim().toLowerCase() === pName && pp.shopId === activeShop && pp.stock > 0)
+                                   .sort((a, b) => new Date(a.importDate).getTime() - new Date(b.importDate).getTime());
+              
+              const totalAvailable = lots.reduce((acc, curr) => acc + curr.stock, 0);
+              
+              if (totalAvailable < needed) {
+                  return alert(`Sản phẩm [${p.name}] không đủ tồn kho trong các lô (Cần ${needed}, Hiện có tổng ${totalAvailable})`);
+              }
+              
+              let remaining = needed;
+              let costForThisItem = 0;
+              
+              for (const lot of lots) {
+                  if (remaining <= 0) break;
+                  const deduct = Math.min(lot.stock, remaining);
+                  remaining -= deduct;
+                  costForThisItem += (Number(lot.originalPrice) || 0) * deduct;
+                  updates.push({ id: lot.id, oldStock: lot.stock, used: deduct, name: lot.name });
+              }
+              
+              if (remaining > 0) {
+                  return alert(`Lỗi: Không thể phân bổ tồn kho. Lô cho [${p.name}] có thể đã bị thay đổi.`);
+              }
+              
+              totalCostPerUnit += costForThisItem / pQty;
           }
 
           const existingCombo = combos.find(c => c.name.trim().toLowerCase() === comboForm.name.trim().toLowerCase() && c.shopId === activeShop);
@@ -2381,9 +2404,12 @@ export default function App() {
                                                   className="w-full bg-white border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium appearance-none cursor-pointer"
                                               >
                                                   <option value="">Chọn sản phẩm...</option>
-                                                  {groups.map(g => (
-                                                      <option key={g.key} value={g.products[0].id}>{g.name} (Tồn: {g.totalStock})</option>
-                                                  ))}
+                                                  {groups.map((g: any) => {
+                                                      const activeProd = g.products.find((p: any) => p.stock > 0) || g.products[0];
+                                                      return (
+                                                          <option key={g.key} value={activeProd.id}>{g.name} (Tồn: {g.totalStock})</option>
+                                                      );
+                                                  })}
                                               </select>
                                               <span className="material-symbols-rounded absolute right-3 top-2.5 text-slate-400 pointer-events-none text-[18px]">expand_more</span>
                                           </div>
