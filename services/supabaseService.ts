@@ -339,6 +339,47 @@ export const addShopStockMove = async (move: any) => {
     if (error) throw error;
 };
 
+// --- SHOP COMBOS ---
+export const getShopCombos = async (shopId: string): Promise<any[]> => {
+    const { data, error } = await supabase
+        .from('shop_combos')
+        .select('*')
+        .eq('shop_id', shopId)
+        .order('created_at', { ascending: false });
+    if (error) {
+        // If table doesn't exist yet, return empty array instead of crashing
+        if (error.code === '42P01') return [];
+        throw error;
+    }
+    return (data || []).map(c => ({
+        id: c.id,
+        shopId: c.shop_id,
+        name: c.name,
+        price: Number(c.price),
+        description: c.description,
+        items: typeof c.items === 'string' ? JSON.parse(c.items) : c.items,
+        createdAt: c.created_at
+    }));
+};
+
+export const addShopCombo = async (combo: any) => {
+    const { error } = await supabase.from('shop_combos').insert({
+        id: combo.id,
+        shop_id: combo.shopId,
+        name: combo.name,
+        price: combo.price,
+        description: combo.description,
+        items: Array.isArray(combo.items) ? JSON.stringify(combo.items) : combo.items,
+        created_at: new Date().toISOString()
+    });
+    if (error) throw error;
+};
+
+export const deleteShopCombo = async (comboId: string) => {
+    const { error } = await supabase.from('shop_combos').delete().eq('id', comboId);
+    if (error) throw error;
+};
+
 export const getPiggyPlan = async (): Promise<any | null> => {
     const { data, error } = await supabase
         .from('piggy_plans')

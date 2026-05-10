@@ -124,6 +124,7 @@ export default function App() {
   const [shopView, setShopView] = useState<'overview' | 'inventory' | 'finance' | 'orders'>('finance');
 
   const [products, setProducts] = useState<any[]>([]);
+  const [combos, setCombos] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [shopFinances, setShopFinances] = useState<any[]>([]);
   const [invSearch, setInvSearch] = useState('');
@@ -144,6 +145,10 @@ export default function App() {
   const [showStockMoves, setShowStockMoves] = useState(false);
   
   const [orderTab, setOrderTab] = useState<'list' | 'create'>('list');
+  const [invTab, setInvTab] = useState<'products' | 'combos'>('products');
+
+  const [comboForm, setComboForm] = useState({ name: '', price: '', description: '', items: [{ productId: '', qty: '1' }] });
+  const [showComboCreator, setShowComboCreator] = useState(false);
 
   // Constant Base Fee (Initial Deposit/Credit)
   // UPDATE: Set to 0 as requested. Mèo has no initial deposit.
@@ -168,10 +173,11 @@ export default function App() {
             await supabaseService.ensureTetSavingExists(INITIAL_ACCOUNTS);
             
             // Fetch data concurrently
-            const [fetchedAccounts, fetchedTransactions, fetchedShopProducts, fetchedShopOrders, fetchedShopFinances, fetchedPiggyPlan, fetchedGoldState] = await Promise.all([
+            const [fetchedAccounts, fetchedTransactions, fetchedShopProducts, fetchedShopCombos, fetchedShopOrders, fetchedShopFinances, fetchedPiggyPlan, fetchedGoldState] = await Promise.all([
                 supabaseService.getAccounts(),
                 supabaseService.getTransactions(),
                 supabaseService.getShopProducts(),
+                supabaseService.getShopCombos(activeShop).catch(() => []),
                 supabaseService.getShopOrders(),
                 supabaseService.getShopFinances(),
                 supabaseService.getPiggyPlan().catch(() => null),
@@ -181,6 +187,7 @@ export default function App() {
             setAccounts(fetchedAccounts);
             setTransactions(fetchedTransactions);
             setProducts(fetchedShopProducts);
+            setCombos(fetchedShopCombos);
             setOrders(fetchedShopOrders);
             setShopFinances(fetchedShopFinances);
             if (fetchedPiggyPlan && fetchedPiggyPlan.days && Array.isArray(fetchedPiggyPlan.days)) {
@@ -2075,9 +2082,14 @@ export default function App() {
   const renderShopInventory = () => {
       const normalizeProductName = (name: any) => String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
       const invSearchText = invSearch.trim().toLowerCase();
+      
       const filteredProducts = products
           .filter(p => p.shopId === activeShop)
           .filter(p => !invSearchText || normalizeProductName(p.name).includes(invSearchText));
+
+      const filteredCombos = combos
+          .filter(c => c.shopId === activeShop)
+          .filter(c => !invSearchText || normalizeProductName(c.name).includes(invSearchText));
       
       const grouped = new Map<string, any>();
       for (const p of filteredProducts) {
@@ -2166,45 +2178,223 @@ export default function App() {
           }
       };
 
+      const handleAddCombo = async () => {
+          if (!comboForm.name || !comboForm.price) return alert('Vui lòng nhập đủ tên và giá combo');
+          if (comboForm.items.some(i => !i.productId || !i.qty)) return alert('Vui lòng chọn sản phẩm và số lượng cho combo');
+
+          const newCombo = {
+              id: 'combo_' + Date.now().toString(),
+              shopId: activeShop,
+              name: comboForm.name,
+              price: parseSmartAmount(comboForm.price),
+              description: comboForm.description,
+              items: comboForm.items.map(i => ({ productId: i.productId, qty: parseInt(i.qty) || 1 })),
+              createdAt: new Date().toISOString()
+          };
+
+          try {
+              await supabaseService.addShopCombo(newCombo);
+              setCombos([newCombo, ...combos]);
+              setComboForm({ name: '', price: '', description: '', items: [{ productId: '', qty: '1' }] });
+              setShowComboCreator(false);
+              alert('Đã tạo combo thành công');
+          } catch (error) {
+              console.error("Error adding combo:", error);
+              alert("Lỗi khi tạo combo");
+          }
+      };
+
       return (
           <div className="space-y-6 animate-fade-in pb-32">
-              <div className="bg-white p-5 sm:p-6 rounded-[32px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50">
-                  <div className="flex items-center gap-2 mb-5">
-                      <div className="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-500">
-                          <span className="material-symbols-rounded text-[18px]">add_box</span>
-                      </div>
-                      <h3 className="font-extrabold text-lg text-slate-800">Thêm hàng mới</h3>
-                  </div>
-                  <div className="space-y-4">
-                      <input type="text" placeholder="Tên sản phẩm" value={invForm.name} onChange={e => setInvForm({...invForm, name: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <input type="text" placeholder="Giá gốc nhập/sản xuất" value={invForm.originalPrice} onChange={e => setInvForm({...invForm, originalPrice: formatNumberInput(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
-                          <input type="text" placeholder="Giá bán niêm yết" value={invForm.sellingPrice} onChange={e => setInvForm({...invForm, sellingPrice: formatNumberInput(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <input type="number" placeholder="Số lượng nhập" value={invForm.stock} onChange={e => setInvForm({...invForm, stock: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
-                          <div className="relative">
-                              <select 
-                                  value={invForm.accountId} 
-                                  onChange={e => setInvForm({...invForm, accountId: e.target.value as AccountType})}
-                                  className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium cursor-pointer appearance-none truncate pr-10"
-                              >
-                                {accounts.map(acc => (
-                                    <option key={acc.id} value={acc.id}>Trừ tiền từ: {acc.name}</option>
-                                ))}
-                              </select>
-                              <span className="material-symbols-rounded absolute right-3 top-3.5 text-slate-400 pointer-events-none text-[20px]">expand_more</span>
-                          </div>
-                      </div>
-                      <div className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus-within:border-slate-800 transition-all font-medium flex items-center relative">
-                          <span className="material-symbols-rounded absolute right-4 text-slate-400 text-[18px] pointer-events-none">calendar_today</span>
-                          <DatePicker selected={invForm.date} onChange={(date: Date | null) => date && setInvForm({...invForm, date})} dateFormat="dd/MM/yyyy" locale={vi} formatWeekDay={formatShortWeekday} className="w-full bg-transparent outline-none cursor-pointer" wrapperClassName="flex-1" />
-                      </div>
-                      <button onClick={handleAddProduct} className="w-full py-4 bg-slate-800 text-white font-bold rounded-2xl shadow-md active:scale-95 transition-all mt-2 flex items-center justify-center gap-2">
-                          <span className="material-symbols-rounded text-[20px]">inventory</span> Thêm vào kho
-                      </button>
-                  </div>
+              <div className="flex bg-slate-100 p-1 rounded-xl relative">
+                   <div className={`absolute top-1 bottom-1 w-[calc(50%-4px)] bg-white rounded-lg shadow-sm transition-all duration-300 ease-spring ${
+                       invTab === 'combos' ? 'left-[calc(50%+2px)]' : 'left-1'
+                   }`}></div>
+                   <button onClick={() => setInvTab('products')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all relative z-10 ${invTab === 'products' ? 'text-indigo-600' : 'text-slate-400'}`}>Sản phẩm</button>
+                   <button onClick={() => setInvTab('combos')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all relative z-10 ${invTab === 'combos' ? 'text-indigo-600' : 'text-slate-400'}`}>Combo</button>
               </div>
+
+              {invTab === 'products' ? (
+                  <div className="bg-white p-5 sm:p-6 rounded-[32px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50">
+                      <div className="flex items-center gap-2 mb-5">
+                          <div className="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-500">
+                              <span className="material-symbols-rounded text-[18px]">add_box</span>
+                          </div>
+                          <h3 className="font-extrabold text-lg text-slate-800">Thêm hàng mới</h3>
+                      </div>
+                      <div className="space-y-4">
+                          <input type="text" placeholder="Tên sản phẩm" value={invForm.name} onChange={e => setInvForm({...invForm, name: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <input type="text" placeholder="Giá gốc nhập/sản xuất" value={invForm.originalPrice} onChange={e => setInvForm({...invForm, originalPrice: formatNumberInput(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
+                              <input type="text" placeholder="Giá bán niêm yết" value={invForm.sellingPrice} onChange={e => setInvForm({...invForm, sellingPrice: formatNumberInput(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <input type="number" placeholder="Số lượng nhập" value={invForm.stock} onChange={e => setInvForm({...invForm, stock: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
+                              <div className="relative">
+                                  <select 
+                                      value={invForm.accountId} 
+                                      onChange={e => setInvForm({...invForm, accountId: e.target.value as AccountType})}
+                                      className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium cursor-pointer appearance-none truncate pr-10"
+                                  >
+                                    {accounts.map(acc => (
+                                        <option key={acc.id} value={acc.id}>Trừ tiền từ: {acc.name}</option>
+                                    ))}
+                                  </select>
+                                  <span className="material-symbols-rounded absolute right-3 top-3.5 text-slate-400 pointer-events-none text-[20px]">expand_more</span>
+                              </div>
+                          </div>
+                          <div className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus-within:border-slate-800 transition-all font-medium flex items-center relative">
+                              <span className="material-symbols-rounded absolute right-4 text-slate-400 text-[18px] pointer-events-none">calendar_today</span>
+                              <DatePicker selected={invForm.date} onChange={(date: Date | null) => date && setInvForm({...invForm, date})} dateFormat="dd/MM/yyyy" locale={vi} formatWeekDay={formatShortWeekday} className="w-full bg-transparent outline-none cursor-pointer" wrapperClassName="flex-1" />
+                          </div>
+                          <button onClick={handleAddProduct} className="w-full py-4 bg-slate-800 text-white font-bold rounded-2xl shadow-md active:scale-95 transition-all mt-2 flex items-center justify-center gap-2">
+                              <span className="material-symbols-rounded text-[20px]">inventory</span> Thêm vào kho
+                          </button>
+                      </div>
+                  </div>
+              ) : (
+                  <div className="bg-white p-5 sm:p-6 rounded-[32px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50">
+                      <div className="flex items-center justify-between mb-5">
+                          <div className="flex items-center gap-2">
+                              <div className="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-500">
+                                  <span className="material-symbols-rounded text-[18px]">loyalty</span>
+                              </div>
+                              <h3 className="font-extrabold text-lg text-slate-800">Quản lý Combo</h3>
+                          </div>
+                          <button 
+                            onClick={() => setShowComboCreator(!showComboCreator)}
+                            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${showComboCreator ? 'bg-slate-100 text-slate-600' : 'bg-indigo-600 text-white shadow-lg shadow-indigo-100'}`}
+                          >
+                              <span className="material-symbols-rounded text-sm">{showComboCreator ? 'close' : 'add'}</span>
+                              {showComboCreator ? 'Hủy' : 'Tạo Combo'}
+                          </button>
+                      </div>
+                      
+                      {showComboCreator && (
+                          <div className="space-y-4 mb-8 p-4 bg-slate-50 border border-slate-200 rounded-2xl animate-in slide-in-from-top duration-300">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  <input type="text" placeholder="Tên combo" value={comboForm.name} onChange={e => setComboForm({...comboForm, name: e.target.value})} className="w-full bg-white border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
+                                  <input type="text" placeholder="Giá bán ưu đãi" value={comboForm.price} onChange={e => setComboForm({...comboForm, price: formatNumberInput(e.target.value)})} className="w-full bg-white border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
+                              </div>
+                              <input type="text" placeholder="Mô tả combo (tuỳ chọn)" value={comboForm.description} onChange={e => setComboForm({...comboForm, description: e.target.value})} className="w-full bg-white border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
+                              
+                              <div className="space-y-2">
+                                  <label className="text-xs font-bold text-slate-500 uppercase px-1">Sản phẩm trong combo</label>
+                                  {comboForm.items.map((item, idx) => (
+                                      <div key={idx} className="flex gap-2">
+                                          <div className="flex-1 relative">
+                                              <select 
+                                                  value={item.productId}
+                                                  onChange={e => {
+                                                      const newItems = [...comboForm.items];
+                                                      newItems[idx].productId = e.target.value;
+                                                      setComboForm({...comboForm, items: newItems});
+                                                  }}
+                                                  className="w-full bg-white border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium appearance-none cursor-pointer"
+                                              >
+                                                  <option value="">Chọn sản phẩm...</option>
+                                                  {groups.map(g => (
+                                                      <option key={g.key} value={g.products[0].id}>{g.name}</option>
+                                                  ))}
+                                              </select>
+                                              <span className="material-symbols-rounded absolute right-3 top-2.5 text-slate-400 pointer-events-none text-[18px]">expand_more</span>
+                                          </div>
+                                          <input 
+                                              type="number" 
+                                              placeholder="SL" 
+                                              value={item.qty}
+                                              onChange={e => {
+                                                  const newItems = [...comboForm.items];
+                                                  newItems[idx].qty = e.target.value;
+                                                  setComboForm({...comboForm, items: newItems});
+                                              }}
+                                              className="w-20 bg-white border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium text-center" 
+                                          />
+                                          {comboForm.items.length > 1 && (
+                                              <button 
+                                                onClick={() => setComboForm({...comboForm, items: comboForm.items.filter((_, i) => i !== idx)})}
+                                                className="w-11 h-11 flex items-center justify-center text-rose-500 hover:bg-rose-50 rounded-xl"
+                                              >
+                                                  <span className="material-symbols-rounded">delete</span>
+                                              </button>
+                                          )}
+                                      </div>
+                                  ))}
+                                  <button 
+                                    onClick={() => setComboForm({...comboForm, items: [...comboForm.items, { productId: '', qty: '1' }]})}
+                                    className="w-full py-2 border-2 border-dashed border-slate-200 rounded-xl text-xs font-bold text-slate-400 hover:border-slate-300 hover:text-slate-500 transition-all"
+                                  >
+                                      + Thêm sản phẩm vào combo
+                                  </button>
+                              </div>
+                              
+                              <button 
+                                onClick={handleAddCombo}
+                                className="w-full py-4 bg-indigo-600 text-white font-bold rounded-2xl shadow-lg shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-2"
+                              >
+                                  <span className="material-symbols-rounded">save</span>
+                                  Lưu Combo sản phẩm
+                              </button>
+                          </div>
+                      )}
+
+                      <div className="space-y-4">
+                          {filteredCombos.length === 0 ? (
+                              <div className="text-center py-10">
+                                  <span className="material-symbols-rounded text-4xl text-slate-200">loyalty</span>
+                                  <p className="text-slate-400 text-sm mt-2">Chưa có combo nào được tạo</p>
+                              </div>
+                          ) : (
+                              filteredCombos.map(combo => (
+                                  <div key={combo.id} className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all group relative overflow-hidden">
+                                      <div className="absolute right-0 top-0 w-24 h-24 bg-indigo-50 rounded-full -mr-12 -mt-12 transition-all group-hover:scale-110"></div>
+                                      <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                                          <div>
+                                              <h4 className="font-bold text-slate-800 text-lg flex items-center gap-2">
+                                                  {combo.name}
+                                                  <span className="bg-indigo-100 text-indigo-700 text-[10px] uppercase px-2 py-0.5 rounded-full">Combo</span>
+                                              </h4>
+                                              <p className="text-xs text-slate-500 mt-1 italic">{combo.description || 'Không có mô tả'}</p>
+                                              <div className="mt-3 space-y-1">
+                                                  {combo.items.map((item: any, i: number) => {
+                                                      const p = products.find(pp => pp.id === item.productId);
+                                                      return (
+                                                          <div key={i} className="flex items-center gap-2 text-[11px] text-slate-600">
+                                                              <div className="w-1.5 h-1.5 rounded-full bg-slate-300"></div>
+                                                              <span>{p?.name || 'Sản phẩm đã xoá'}: </span>
+                                                              <span className="font-bold text-slate-800">x{item.qty}</span>
+                                                          </div>
+                                                      );
+                                                  })}
+                                              </div>
+                                          </div>
+                                          <div className="flex flex-col items-end gap-3">
+                                              <div className="text-right">
+                                                  <div className="text-[10px] font-bold text-slate-400 uppercase leading-none">Giá Combo</div>
+                                                  <div className="text-xl font-black text-indigo-600 mt-1">{formatCurrency(combo.price)}</div>
+                                              </div>
+                                              <button 
+                                                onClick={async () => {
+                                                    if (!window.confirm(`Xoá combo "${combo.name}"?`)) return;
+                                                    try {
+                                                        await supabaseService.deleteShopCombo(combo.id);
+                                                        setCombos(combos.filter(c => c.id !== combo.id));
+                                                    } catch (e) {
+                                                        alert('Lỗi khi xoá combo');
+                                                    }
+                                                }}
+                                                className="w-8 h-8 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all active:scale-90"
+                                              >
+                                                  <span className="material-symbols-rounded text-lg">delete</span>
+                                              </button>
+                                          </div>
+                                      </div>
+                                  </div>
+                              ))
+                          )}
+                      </div>
+                  </div>
+              )}
 
               <div className="space-y-4">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between px-2 gap-3">
@@ -2653,9 +2843,45 @@ export default function App() {
                                       <span className="material-symbols-rounded text-[18px]">inventory_2</span>
                                       Sản phẩm đơn hàng
                                   </label>
-                                  <button onClick={() => setOrdItems([...ordItems, { productId: '', qty: '1', price: '' }])} className="text-xs font-bold px-3 py-1.5 rounded-lg bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 active:scale-95 transition-all flex items-center gap-1 shadow-sm">
-                                      <span className="material-symbols-rounded text-[14px]">add</span>Thêm
-                                  </button>
+                                  <div className="flex gap-2">
+                                      {combos.length > 0 && (
+                                          <div className="relative">
+                                              <select 
+                                                  onChange={(e) => {
+                                                      const comboId = e.target.value;
+                                                      if (!comboId) return;
+                                                      const combo = combos.find(c => c.id === comboId);
+                                                      if (combo) {
+                                                          const totalSingles = combo.items.reduce((acc: number, it: any) => {
+                                                              const prod = products.find(pp => pp.id === it.productId);
+                                                              return acc + (Number(prod?.sellingPrice || 0) * it.qty);
+                                                          }, 0);
+                                                          const ratio = totalSingles > 0 ? (combo.price / totalSingles) : 1;
+                                                          const newLines = combo.items.map((item: any) => {
+                                                              const p = products.find(pp => pp.id === item.productId);
+                                                              const pPrice = p ? (Number(p.sellingPrice) * ratio) : 0;
+                                                              return {
+                                                                  productId: item.productId,
+                                                                  qty: String(item.qty),
+                                                                  price: isShopee ? formatNumberInput(String(pPrice * 1.3)) : formatNumberInput(String(pPrice))
+                                                              };
+                                                          });
+                                                          setOrdItems(prev => [...prev.filter(i => i.productId), ...newLines]);
+                                                          e.target.value = '';
+                                                      }
+                                                  }}
+                                                  className="text-[11px] font-bold pl-2 pr-6 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100 outline-none appearance-none cursor-pointer"
+                                              >
+                                                  <option value="">+ Combo</option>
+                                                  {combos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                                              </select>
+                                              <span className="material-symbols-rounded absolute right-1.5 top-2 text-emerald-400 pointer-events-none text-sm">expand_more</span>
+                                          </div>
+                                      )}
+                                      <button onClick={() => setOrdItems([...ordItems, { productId: '', qty: '1', price: '' }])} className="text-[11px] font-bold px-3 py-1.5 rounded-lg bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 active:scale-95 transition-all flex items-center gap-1 shadow-sm">
+                                          <span className="material-symbols-rounded text-[14px]">add</span>Món lẻ
+                                      </button>
+                                  </div>
                               </div>
                               <div className="p-3 bg-slate-50 space-y-2">
                                   {ordItems.map((it, idx) => (
