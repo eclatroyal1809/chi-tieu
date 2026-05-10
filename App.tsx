@@ -2237,37 +2237,42 @@ export default function App() {
               if (existingCombo) {
                   // Incremental packaging for existing combo
                   const newStock = (existingCombo.stock || 0) + pQty;
+                  const finalCost = isNaN(totalCostPerUnit) ? (existingCombo.cost || 0) : totalCostPerUnit;
+                  
                   await supabaseService.updateShopComboStock(existingCombo.id, newStock);
                   
                   // Update products stock
                   for (const u of updates) {
                       await supabaseService.updateShopProductStock(u.id, u.oldStock - u.used);
                       await supabaseService.addShopStockMove({
-                          id: Date.now().toString() + '_cb_' + u.id,
+                          id: Date.now().toString() + '_cb_' + u.id + '_' + Math.random().toString(36).substr(2, 5),
                           shopId: activeShop,
                           productId: u.id,
                           type: 'OUT',
                           qty: u.used,
-                          reason: `Đóng gói thêm Combo: ${existingCombo.name}`,
+                          reason: 'combo_pack',
                           date: new Date().toISOString()
                       });
                   }
 
-                  setCombos(combos.map(c => c.id === existingCombo.id ? { ...c, stock: newStock, cost: totalCostPerUnit } : c));
+                  setCombos(combos.map(c => c.id === existingCombo.id ? { ...c, stock: newStock, cost: finalCost } : c));
                   setProducts(products.map(p => {
                       const u = updates.find(uu => uu.id === p.id);
                       return u ? { ...p, stock: u.oldStock - u.used } : p;
                   }));
 
-                  alert(`Đã đóng gói thêm ${pQty} combo "${existingCombo.name}"`);
+                  alert(`Đã đóng gói thêm ${pQty} combo "${existingCombo.name}" thành công!`);
               } else {
                   // Create new combo
+                  const newComboPrice = parseSmartAmount(comboForm.price);
+                  const newComboCost = isNaN(totalCostPerUnit) ? 0 : totalCostPerUnit;
+                  
                   const newCombo = {
-                      id: 'combo_' + Date.now().toString(),
+                      id: 'combo_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5),
                       shopId: activeShop,
                       name: comboForm.name,
-                      price: parseSmartAmount(comboForm.price),
-                      cost: totalCostPerUnit,
+                      price: newComboPrice,
+                      cost: newComboCost,
                       stock: pQty,
                       description: comboForm.description,
                       items: comboForm.items.map(i => ({ productId: i.productId, qty: parseInt(i.qty) || 1 })),
@@ -2280,12 +2285,12 @@ export default function App() {
                   for (const u of updates) {
                       await supabaseService.updateShopProductStock(u.id, u.oldStock - u.used);
                       await supabaseService.addShopStockMove({
-                          id: Date.now().toString() + '_cbnew_' + u.id,
+                          id: Date.now().toString() + '_cbnew_' + u.id + '_' + Math.random().toString(36).substr(2, 5),
                           shopId: activeShop,
                           productId: u.id,
                           type: 'OUT',
                           qty: u.used,
-                          reason: `Khởi tạo & Đóng gói Combo: ${newCombo.name}`,
+                          reason: 'combo_pack',
                           date: new Date().toISOString()
                       });
                   }
@@ -2296,7 +2301,7 @@ export default function App() {
                       return u ? { ...p, stock: u.oldStock - u.used } : p;
                   }));
 
-                  alert(`Bản thảo combo mới đã được tạo và đóng gói ${pQty} đơn vị thành công`);
+                  alert(`Combo mới "${newCombo.name}" đã được tạo và đóng gói ${pQty} đơn vị thành công!`);
               }
 
               setComboForm({ name: '', price: '', description: '', packQty: '1', items: [{ productId: '', qty: '1' }] });
@@ -2305,8 +2310,12 @@ export default function App() {
               console.error("Error adding/packaging combo:", error);
               if (error?.code === '42P01') {
                   alert("Bảng 'shop_combos' chưa được tạo trên Supabase!\n\nVui lòng vào Supabase SQL Editor và chạy lệnh sau:\n\nCREATE TABLE shop_combos (\n  id TEXT PRIMARY KEY,\n  shop_id TEXT,\n  name TEXT,\n  price NUMERIC,\n  cost NUMERIC,\n  stock INT,\n  description TEXT,\n  items JSONB,\n  created_at TIMESTAMPTZ\n);");
+              } else if (error?.code === '42501') {
+                  alert("Lỗi bảo mật (RLS) trên Supabase!\n\nBảng 'shop_combos' hoặc 'shop_stock_moves' đang chặn quyền ghi dữ liệu. Vui lòng chạy lệnh này trong Supabase SQL Editor:\n\nCREATE POLICY \"Enable all\" ON shop_combos FOR ALL USING (true) WITH CHECK (true);\nCREATE POLICY \"Enable all\" ON shop_stock_moves FOR ALL USING (true) WITH CHECK (true);");
+              } else if (error?.code === '23514') {
+                  alert("Lỗi dữ liệu (Check Constraint)!\n\nGiá trị nhập vào không hợp lệ với quy định của bảng. Vui lòng chạy lệnh này trong Supabase SQL Editor để mở rộng giới hạn:\n\nALTER TABLE shop_stock_moves DROP CONSTRAINT IF EXISTS shop_stock_moves_reason_check;");
               } else {
-                  alert("Lỗi khi thao tác combo: " + (error?.message || JSON.stringify(error)));
+                  alert("Lỗi khi thực hiện: " + (error?.message || error?.details || JSON.stringify(error)));
               }
           } finally {
               setIsLoading(false);
