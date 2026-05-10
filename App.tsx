@@ -147,7 +147,7 @@ export default function App() {
   const [orderTab, setOrderTab] = useState<'list' | 'create'>('list');
   const [invTab, setInvTab] = useState<'products' | 'combos'>('products');
 
-  const [comboForm, setComboForm] = useState({ name: '', price: '', description: '', items: [{ productId: '', qty: '1' }] });
+  const [comboForm, setComboForm] = useState({ name: '', price: '', description: '', packQty: '1', items: [{ productId: '', qty: '1' }] });
   const [showComboCreator, setShowComboCreator] = useState(false);
 
   // Constant Base Fee (Initial Deposit/Credit)
@@ -2181,26 +2181,97 @@ export default function App() {
       const handleAddCombo = async () => {
           if (!comboForm.name || !comboForm.price) return alert('Vui lòng nhập đủ tên và giá combo');
           if (comboForm.items.some(i => !i.productId || !i.qty)) return alert('Vui lòng chọn sản phẩm và số lượng cho combo');
+          
+          const pQty = parseInt(comboForm.packQty) || 1;
+          if (pQty <= 0) return alert('Số lượng đóng gói phải lớn hơn 0');
 
-          const newCombo = {
-              id: 'combo_' + Date.now().toString(),
-              shopId: activeShop,
-              name: comboForm.name,
-              price: parseSmartAmount(comboForm.price),
-              description: comboForm.description,
-              items: comboForm.items.map(i => ({ productId: i.productId, qty: parseInt(i.qty) || 1 })),
-              createdAt: new Date().toISOString()
-          };
+          // Check stock and calculate cost
+          let totalCostPerUnit = 0;
+          const updates = [];
+          
+          for (const item of comboForm.items) {
+              const p = products.find(pp => pp.id === item.productId);
+              if (!p) return alert('Không tìm thấy sản phẩm thành phần');
+              const needed = (parseInt(item.qty) || 1) * pQty;
+              if (p.stock < needed) return alert(`Sản phẩm [${p.name}] không đủ tồn kho (Cần ${needed}, Hiện có ${p.stock})`);
+              
+              totalCostPerUnit += (Number(p.originalPrice) || 0) * (parseInt(item.qty) || 1);
+              updates.push({ id: p.id, oldStock: p.stock, used: needed, name: p.name });
+          }
+
+          const existingCombo = combos.find(c => c.name.trim().toLowerCase() === comboForm.name.trim().toLowerCase() && c.shopId === activeShop);
 
           try {
-              await supabaseService.addShopCombo(newCombo);
-              setCombos([newCombo, ...combos]);
-              setComboForm({ name: '', price: '', description: '', items: [{ productId: '', qty: '1' }] });
+              if (existingCombo) {
+                  // Incremental packaging for existing combo
+                  const newStock = (existingCombo.stock || 0) + pQty;
+                  await supabaseService.updateShopComboStock(existingCombo.id, newStock);
+                  
+                  // Update products stock
+                  for (const u of updates) {
+                      await supabaseService.updateShopProductStock(u.id, u.oldStock - u.used);
+                      await supabaseService.addShopStockMove({
+                          id: Date.now().toString() + '_cb_' + u.id,
+                          shopId: activeShop,
+                          productId: u.id,
+                          type: 'OUT',
+                          qty: u.used,
+                          reason: `Đóng gói thêm Combo: ${existingCombo.name}`,
+                          date: new Date().toISOString()
+                      });
+                  }
+
+                  setCombos(combos.map(c => c.id === existingCombo.id ? { ...c, stock: newStock, cost: totalCostPerUnit } : c));
+                  setProducts(products.map(p => {
+                      const u = updates.find(uu => uu.id === p.id);
+                      return u ? { ...p, stock: u.oldStock - u.used } : p;
+                  }));
+
+                  alert(`Đã đóng gói thêm ${pQty} combo "${existingCombo.name}"`);
+              } else {
+                  // Create new combo
+                  const newCombo = {
+                      id: 'combo_' + Date.now().toString(),
+                      shopId: activeShop,
+                      name: comboForm.name,
+                      price: parseSmartAmount(comboForm.price),
+                      cost: totalCostPerUnit,
+                      stock: pQty,
+                      description: comboForm.description,
+                      items: comboForm.items.map(i => ({ productId: i.productId, qty: parseInt(i.qty) || 1 })),
+                      createdAt: new Date().toISOString()
+                  };
+
+                  await supabaseService.addShopCombo(newCombo);
+                  
+                  // Update products stock
+                  for (const u of updates) {
+                      await supabaseService.updateShopProductStock(u.id, u.oldStock - u.used);
+                      await supabaseService.addShopStockMove({
+                          id: Date.now().toString() + '_cbnew_' + u.id,
+                          shopId: activeShop,
+                          productId: u.id,
+                          type: 'OUT',
+                          qty: u.used,
+                          reason: `Khởi tạo & Đóng gói Combo: ${newCombo.name}`,
+                          date: new Date().toISOString()
+                      });
+                  }
+
+                  setCombos([newCombo, ...combos]);
+                  setProducts(products.map(p => {
+                      const u = updates.find(uu => uu.id === p.id);
+                      return u ? { ...p, stock: u.oldStock - u.used } : p;
+                  }));
+
+                  alert(`Bản thảo combo mới đã được tạo và đóng gói ${pQty} đơn vị thành công`);
+              }
+
+              setComboForm({ name: '', price: '', description: '', packQty: '1', items: [{ productId: '', qty: '1' }] });
               setShowComboCreator(false);
-              alert('Đã tạo combo thành công');
           } catch (error) {
-              console.error("Error adding combo:", error);
-              alert("Lỗi khi tạo combo");
+              console.error("Error adding/packaging combo:", error);
+              alert("Lỗi khi thao tác combo");
           }
       };
 
@@ -2270,16 +2341,33 @@ export default function App() {
                           </button>
                       </div>
                       
-                      {showComboCreator && (
+                      {showComboCreator && (() => {
+                          const comboCostPerUnit = comboForm.items.reduce((acc, item) => {
+                              const p = products.find(pp => pp.id === item.productId);
+                              return acc + (p ? (Number(p.originalPrice) || 0) * (parseInt(item.qty) || 0) : 0);
+                          }, 0);
+                          const packQty = parseInt(comboForm.packQty) || 0;
+
+                          return (
                           <div className="space-y-4 mb-8 p-4 bg-slate-50 border border-slate-200 rounded-2xl animate-in slide-in-from-top duration-300">
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                  <input type="text" placeholder="Tên combo" value={comboForm.name} onChange={e => setComboForm({...comboForm, name: e.target.value})} className="w-full bg-white border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
-                                  <input type="text" placeholder="Giá bán ưu đãi" value={comboForm.price} onChange={e => setComboForm({...comboForm, price: formatNumberInput(e.target.value)})} className="w-full bg-white border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
+                                  <input type="text" placeholder="Tên combo (VD: Combo Chăm Sóc)" value={comboForm.name} onChange={e => setComboForm({...comboForm, name: e.target.value})} className="w-full bg-white border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
+                                  <input type="text" placeholder="Giá bán combo" value={comboForm.price} onChange={e => setComboForm({...comboForm, price: formatNumberInput(e.target.value)})} className="w-full bg-white border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
                               </div>
-                              <input type="text" placeholder="Mô tả combo (tuỳ chọn)" value={comboForm.description} onChange={e => setComboForm({...comboForm, description: e.target.value})} className="w-full bg-white border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
+                              
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+                                  <input type="text" placeholder="Mô tả combo (tuỳ chọn)" value={comboForm.description} onChange={e => setComboForm({...comboForm, description: e.target.value})} className="w-full bg-white border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
+                                  <div className="flex flex-col gap-1">
+                                      <label className="text-[10px] font-bold text-slate-400 px-1 uppercase">Số lượng combo đóng gói ngay</label>
+                                      <input type="number" placeholder="Số lượng đóng gói" value={comboForm.packQty} onChange={e => setComboForm({...comboForm, packQty: e.target.value})} className="w-full bg-white border border-indigo-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-600 transition-all font-bold text-indigo-600" />
+                                  </div>
+                              </div>
                               
                               <div className="space-y-2">
-                                  <label className="text-xs font-bold text-slate-500 uppercase px-1">Sản phẩm trong combo</label>
+                                  <div className="flex justify-between items-center px-1">
+                                      <label className="text-xs font-bold text-slate-500 uppercase">Sản phẩm trong combo</label>
+                                      <div className="text-[11px] font-bold text-indigo-500">Cost/ combo: {formatCurrency(comboCostPerUnit)}</div>
+                                  </div>
                                   {comboForm.items.map((item, idx) => (
                                       <div key={idx} className="flex gap-2">
                                           <div className="flex-1 relative">
@@ -2294,7 +2382,7 @@ export default function App() {
                                               >
                                                   <option value="">Chọn sản phẩm...</option>
                                                   {groups.map(g => (
-                                                      <option key={g.key} value={g.products[0].id}>{g.name}</option>
+                                                      <option key={g.key} value={g.products[0].id}>{g.name} (Tồn: {g.totalStock})</option>
                                                   ))}
                                               </select>
                                               <span className="material-symbols-rounded absolute right-3 top-2.5 text-slate-400 pointer-events-none text-[18px]">expand_more</span>
@@ -2328,15 +2416,23 @@ export default function App() {
                                   </button>
                               </div>
                               
+                              <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 mt-2">
+                                  <div className="flex justify-between items-center text-indigo-700 font-bold text-sm">
+                                      <span>Tổng cost vốn ({packQty} combo):</span>
+                                      <span>{formatCurrency(comboCostPerUnit * packQty)}</span>
+                                  </div>
+                                  <p className="text-[10px] text-indigo-500 mt-1">* Hệ thống sẽ tự động trừ tồn kho các sản phẩm thành phần khi lưu.</p>
+                              </div>
+
                               <button 
                                 onClick={handleAddCombo}
                                 className="w-full py-4 bg-indigo-600 text-white font-bold rounded-2xl shadow-lg shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-2"
                               >
-                                  <span className="material-symbols-rounded">save</span>
-                                  Lưu Combo sản phẩm
+                                  <span className="material-symbols-rounded">inventory_2</span>
+                                  Xác nhận & Đóng gói Combo
                               </button>
                           </div>
-                      )}
+                      )})}
 
                       <div className="space-y-4">
                           {filteredCombos.length === 0 ? (
@@ -2370,23 +2466,46 @@ export default function App() {
                                           </div>
                                           <div className="flex flex-col items-end gap-3">
                                               <div className="text-right">
-                                                  <div className="text-[10px] font-bold text-slate-400 uppercase leading-none">Giá Combo</div>
+                                                  <div className="text-[10px] font-bold text-slate-400 uppercase leading-none">Tồn: <span className="text-slate-800 font-black">{combo.stock || 0}</span> • Vốn: {formatCurrency(combo.cost || 0)}</div>
                                                   <div className="text-xl font-black text-indigo-600 mt-1">{formatCurrency(combo.price)}</div>
                                               </div>
-                                              <button 
-                                                onClick={async () => {
-                                                    if (!window.confirm(`Xoá combo "${combo.name}"?`)) return;
-                                                    try {
-                                                        await supabaseService.deleteShopCombo(combo.id);
-                                                        setCombos(combos.filter(c => c.id !== combo.id));
-                                                    } catch (e) {
-                                                        alert('Lỗi khi xoá combo');
-                                                    }
-                                                }}
-                                                className="w-8 h-8 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all active:scale-90"
-                                              >
-                                                  <span className="material-symbols-rounded text-lg">delete</span>
-                                              </button>
+                                              <div className="flex gap-2">
+                                                <button 
+                                                    onClick={() => {
+                                                        const confirm = window.confirm(`Đóng gói thêm 1 combo "${combo.name}"? (Sẽ trừ tồn kho sản phẩm tương ứng)`);
+                                                        if (!confirm) return;
+                                                        // This reuse of handleAddCombo for existing is tricky, 
+                                                        // I'll just set the form and toggle it if needed, 
+                                                        // but for speed I'll just implement the pack logic in a separate helper or just rely on the main creator.
+                                                        setComboForm({
+                                                            name: combo.name,
+                                                            price: formatNumberInput(String(combo.price)),
+                                                            description: combo.description || '',
+                                                            packQty: '1',
+                                                            items: combo.items.map((it: any) => ({ productId: it.productId, qty: String(it.qty) }))
+                                                        });
+                                                        setShowComboCreator(true);
+                                                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                                                    }}
+                                                    className="px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 text-[10px] font-bold hover:bg-indigo-100 transition-all"
+                                                >
+                                                    + Pack thêm
+                                                </button>
+                                                <button 
+                                                    onClick={async () => {
+                                                        if (!window.confirm(`Xoá combo "${combo.name}"? (Lưu ý: Thao tác này không hoàn lại tồn kho đã trừ)`)) return;
+                                                        try {
+                                                            await supabaseService.deleteShopCombo(combo.id);
+                                                            setCombos(combos.filter(c => c.id !== combo.id));
+                                                        } catch (e) {
+                                                            alert('Lỗi khi xoá combo');
+                                                        }
+                                                    }}
+                                                    className="w-8 h-8 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all active:scale-90"
+                                                >
+                                                    <span className="material-symbols-rounded text-lg">delete</span>
+                                                </button>
+                                              </div>
                                           </div>
                                       </div>
                                   </div>
@@ -2695,19 +2814,25 @@ export default function App() {
       const activeOrders = orders.filter(o => o.shopId === activeShop).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       
       const isShopee = ordForm.channel === 'Shopee';
-      const selectedLines = ordItems.filter(i => i.productId);
+      const selectedLines = ordItems.filter(i => i.productId || i.comboId);
       const getLineUnitPrice = (p: any | undefined, it: any) => {
+          if (it.isCombo) {
+              const combo = combos.find(c => c.id === it.comboId);
+              const override = parseSmartAmount(it.price || '') || 0;
+              return override > 0 ? override : (combo?.price || 0);
+          }
           const base = p ? Number(p.sellingPrice) || 0 : 0;
-          if (!isShopee) return base;
           const override = parseSmartAmount(it.price || '') || 0;
           if (override > 0) return override;
+          if (!isShopee) return base;
           return base * 1.3;
       };
       const detailPreview = selectedLines.map(i => {
           const p = products.find(pp => pp.id === i.productId);
+          const combo = combos.find(c => c.id === i.comboId);
           const q = parseInt(i.qty) || 1;
           const price = getLineUnitPrice(p, i);
-          return { p, q, price, total: q * price, productId: i.productId };
+          return { p, combo, q, price, total: q * price, productId: i.productId, comboId: i.comboId, isCombo: i.isCombo };
       });
       const totalOrder = detailPreview.reduce((s, d) => s + d.total, 0);
       const voucher = parseSmartAmount(ordForm.voucher) || 0;
@@ -2866,13 +2991,13 @@ export default function App() {
                                                                   price: isShopee ? formatNumberInput(String(pPrice * 1.3)) : formatNumberInput(String(pPrice))
                                                               };
                                                           });
-                                                          setOrdItems(prev => [...prev.filter(i => i.productId), ...newLines]);
+                                                          setOrdItems(prev => [...prev.filter(i => i.productId || i.comboId), { comboId: combo.id, qty: '1', price: formatNumberInput(String(combo.price)), isCombo: true }]);
                                                           e.target.value = '';
                                                       }
                                                   }}
                                                   className="text-[11px] font-bold pl-2 pr-6 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100 outline-none appearance-none cursor-pointer"
                                               >
-                                                  <option value="">+ Combo</option>
+                                                  <option value="">+ Combo (Đóng gói)</option>
                                                   {combos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                               </select>
                                               <span className="material-symbols-rounded absolute right-1.5 top-2 text-emerald-400 pointer-events-none text-sm">expand_more</span>
@@ -2884,48 +3009,78 @@ export default function App() {
                                   </div>
                               </div>
                               <div className="p-3 bg-slate-50 space-y-2">
-                                  {ordItems.map((it, idx) => (
-                                      <div key={idx} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row gap-2 relative group">
-                                          <div className="flex-1 relative">
-                                              <select value={it.productId} onChange={e => {
-                                                  const nextProductId = e.target.value;
-                                                  setOrdItems(ordItems.map((x,i)=> {
-                                                      if (i !== idx) return x;
-                                                      const prod = products.find(pp => pp.id === nextProductId);
-                                                      const next: any = { ...x, productId: nextProductId };
-                                                      if (isShopee && (!x.price || x.price === '') && prod) {
-                                                          next.price = formatNumberInput(String((Number(prod.sellingPrice) || 0) * 1.3));
-                                                      }
-                                                      return next;
-                                                  }));
-                                              }} className="w-full bg-slate-50 border border-slate-200 px-3 py-3 rounded-xl text-sm font-medium outline-none cursor-pointer appearance-none truncate pr-8">
-                                                  <option value="">-- Chọn sản phẩm --</option>
-                                                  {activeProducts.map(p => (
-                                                      <option key={p.id} value={p.id}>{p.name} (Kho: {p.stock})</option>
-                                                  ))}
-                                              </select>
-                                              <span className="material-symbols-rounded absolute right-2.5 top-3.5 text-slate-400 pointer-events-none text-[18px]">expand_more</span>
-                                          </div>
-                                          <div className="flex items-center gap-2">
-                                              <div className="relative w-20">
-                                                  <span className="absolute left-2.5 top-3 text-xs font-bold text-slate-400 pointer-events-none">SL </span>
-                                                  <input type="number" min="1" value={it.qty} onChange={e => setOrdItems(ordItems.map((x,i)=> i===idx ? {...x, qty: e.target.value} : x))} className="w-full bg-slate-50 border border-slate-200 pl-8 pr-2 py-3 rounded-xl text-sm outline-none text-center font-bold" />
+                                  {ordItems.map((it, idx) => {
+                                      if (it.isCombo) {
+                                          const combo = combos.find(c => c.id === it.comboId);
+                                          return (
+                                              <div key={idx} className="bg-white p-3 rounded-xl border border-emerald-200 shadow-sm flex flex-col sm:flex-row gap-2 relative group">
+                                                  <div className="flex-1 flex items-center px-4 py-3 bg-emerald-50 rounded-xl">
+                                                      <span className="material-symbols-rounded text-emerald-600 mr-2">loyalty</span>
+                                                      <div className="flex flex-col">
+                                                          <span className="text-sm font-bold text-slate-800">{combo?.name || 'Combo không xác định'}</span>
+                                                          <span className="text-[10px] text-emerald-600 font-bold uppercase tracking-tight">Combo đã đóng gói (Kho: {combo?.stock || 0})</span>
+                                                      </div>
+                                                  </div>
+                                                  <div className="flex items-center gap-2">
+                                                      <div className="relative w-20">
+                                                          <span className="absolute left-2.5 top-3 text-xs font-bold text-slate-400 pointer-events-none">SL </span>
+                                                          <input type="number" min="1" value={it.qty} onChange={e => setOrdItems(ordItems.map((x,i)=> i===idx ? {...x, qty: e.target.value} : x))} className="w-full bg-slate-50 border border-slate-200 pl-8 pr-2 py-3 rounded-xl text-sm outline-none text-center font-bold" />
+                                                      </div>
+                                                      <input
+                                                          type="text"
+                                                          placeholder="Giá combo"
+                                                          value={it.price || ''}
+                                                          onChange={e => setOrdItems(ordItems.map((x,i)=> i===idx ? { ...x, price: formatNumberInput(e.target.value) } : x))}
+                                                          className="w-[110px] bg-slate-50 border border-slate-200 px-3 py-3 rounded-xl text-sm outline-none text-right font-bold text-indigo-600"
+                                                      />
+                                                      <button onClick={() => setOrdItems(ordItems.filter((_,i)=>i!==idx))} className="w-11 h-[46px] flex items-center justify-center rounded-xl bg-rose-50 text-rose-500 hover:bg-rose-100 border border-rose-100 transition-colors">
+                                                          <span className="material-symbols-rounded text-[20px]">delete_outline</span>
+                                                      </button>
+                                                  </div>
                                               </div>
-                                              {isShopee && (
+                                          );
+                                      }
+                                      return (
+                                          <div key={idx} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row gap-2 relative group">
+                                              <div className="flex-1 relative">
+                                                  <select value={it.productId} onChange={e => {
+                                                      const nextProductId = e.target.value;
+                                                      setOrdItems(ordItems.map((x,i)=> {
+                                                          if (i !== idx) return x;
+                                                          const prod = products.find(pp => pp.id === nextProductId);
+                                                          const next: any = { ...x, productId: nextProductId };
+                                                          if (isShopee && (!x.price || x.price === '') && prod) {
+                                                              next.price = formatNumberInput(String((Number(prod.sellingPrice) || 0) * 1.3));
+                                                          }
+                                                          return next;
+                                                      }));
+                                                  }} className="w-full bg-slate-50 border border-slate-200 px-3 py-3 rounded-xl text-sm font-medium outline-none cursor-pointer appearance-none truncate pr-8">
+                                                      <option value="">-- Chọn sản phẩm --</option>
+                                                      {activeProducts.map(p => (
+                                                          <option key={p.id} value={p.id}>{p.name} (Kho: {p.stock})</option>
+                                                      ))}
+                                                  </select>
+                                                  <span className="material-symbols-rounded absolute right-2.5 top-3.5 text-slate-400 pointer-events-none text-[18px]">expand_more</span>
+                                              </div>
+                                              <div className="flex items-center gap-2">
+                                                  <div className="relative w-20">
+                                                      <span className="absolute left-2.5 top-3 text-xs font-bold text-slate-400 pointer-events-none">SL </span>
+                                                      <input type="number" min="1" value={it.qty} onChange={e => setOrdItems(ordItems.map((x,i)=> i===idx ? {...x, qty: e.target.value} : x))} className="w-full bg-slate-50 border border-slate-200 pl-8 pr-2 py-3 rounded-xl text-sm outline-none text-center font-bold" />
+                                                  </div>
                                                   <input
                                                       type="text"
-                                                      placeholder="Giá đơn"
+                                                      placeholder="Giá lẻ"
                                                       value={it.price || ''}
                                                       onChange={e => setOrdItems(ordItems.map((x,i)=> i===idx ? { ...x, price: formatNumberInput(e.target.value) } : x))}
                                                       className="w-[110px] bg-slate-50 border border-slate-200 px-3 py-3 rounded-xl text-sm outline-none text-right font-bold text-emerald-600"
                                                   />
-                                              )}
-                                              <button onClick={() => setOrdItems(ordItems.filter((_,i)=>i!==idx))} className="w-11 h-[46px] flex items-center justify-center rounded-xl bg-rose-50 text-rose-500 hover:bg-rose-100 border border-rose-100 transition-colors">
-                                                  <span className="material-symbols-rounded text-[20px]">delete_outline</span>
-                                              </button>
+                                                  <button onClick={() => setOrdItems(ordItems.filter((_,i)=>i!==idx))} className="w-11 h-[46px] flex items-center justify-center rounded-xl bg-rose-50 text-rose-500 hover:bg-rose-100 border border-rose-100 transition-colors">
+                                                      <span className="material-symbols-rounded text-[20px]">delete_outline</span>
+                                                  </button>
+                                              </div>
                                           </div>
-                                      </div>
-                                  ))}
+                                      );
+                                  })}
                               </div>
                           </div>
 
@@ -2986,28 +3141,42 @@ export default function App() {
                                       alert('Vui lòng nhập tên khách hàng');
                                       return;
                                   }
-                                  if (ordItems.every(i => !i.productId)) {
-                                      alert('Vui lòng thêm ít nhất 1 sản phẩm trong danh sách nhiều sản phẩm');
+                                  if (ordItems.every(i => !i.productId && !i.comboId)) {
+                                      alert('Vui lòng thêm ít nhất 1 sản phẩm hoặc combo');
                                       return;
                                   }
                                   const isShopeeLocal = ordForm.channel === 'Shopee';
-                                  const detail = ordItems.filter(i=>i.productId).map(i => {
+                                  const detail = ordItems.filter(i=>(i.productId || i.comboId)).map(i => {
+                                      if (i.isCombo) {
+                                          const combo = combos.find(c => c.id === i.comboId);
+                                          const q = parseInt(i.qty) || 1;
+                                          const price = parseSmartAmount(i.price || '') || (combo?.price || 0);
+                                          return { combo, q, price, total: q * price, comboId: i.comboId, isCombo: true };
+                                      }
                                       const p = products.find(pp => pp.id === i.productId);
                                       const q = parseInt(i.qty) || 1;
                                       let price = p ? Number(p.sellingPrice) || 0 : 0;
                                       if (isShopeeLocal) {
                                           const override = parseSmartAmount(i.price || '') || 0;
                                           price = override > 0 ? override : price * 1.3;
+                                      } else {
+                                          const override = parseSmartAmount(i.price || '') || 0;
+                                          if (override > 0) price = override;
                                       }
-                                      return { p, q, price, total: q * price, productId: i.productId };
+                                      return { p, q, price, total: q * price, productId: i.productId, isCombo: false };
                                   });
                                   if (detail.length === 0) {
                                       alert('Danh sách sản phẩm không hợp lệ');
                                       return;
                                   }
                                   for (const d of detail) {
-                                      if (!d.p) { alert('Sản phẩm không hợp lệ'); return; }
-                                      if (d.q > d.p.stock) { alert(`Số lượng vượt tồn: ${d.p.name}`); return; }
+                                      if (d.isCombo) {
+                                          if (!d.combo) { alert('Combo không hợp lệ'); return; }
+                                          if (d.q > (d.combo.stock || 0)) { alert(`Số lượng vượt tồn combo: ${d.combo.name}`); return; }
+                                      } else {
+                                          if (!d.p) { alert('Sản phẩm không hợp lệ'); return; }
+                                          if (d.q > d.p.stock) { alert(`Số lượng vượt tồn: ${d.p.name}`); return; }
+                                      }
                                   }
                                   const total = detail.reduce((s,d)=>s+d.total,0);
                                   const voucherLocal = parseSmartAmount(ordForm.voucher) || 0;
@@ -3025,7 +3194,13 @@ export default function App() {
                                       name: ordForm.name,
                                       phone: isShopeeLocal ? '' : ordForm.phone,
                                       address: isShopeeLocal ? '' : ordForm.address,
-                                      productId: JSON.stringify(detail.map(d => ({ productId: d.productId, qty: d.q, unitPrice: d.price }))),
+                                      productId: JSON.stringify(detail.map(d => ({ 
+                                          productId: d.isCombo ? null : d.productId, 
+                                          comboId: d.isCombo ? d.comboId : null,
+                                          qty: d.q, 
+                                          unitPrice: d.price,
+                                          isCombo: d.isCombo
+                                      }))),
                                       qty: detail.reduce((s,d)=>s+d.q,0),
                                       deposit: isShopeeLocal ? 0 : (parseSmartAmount(ordForm.deposit) || 0),
                                       shipping: parseSmartAmount(ordForm.shipping) || 0,
@@ -3040,7 +3215,10 @@ export default function App() {
                                   try {
                                       await supabaseService.addShopOrder(newOrder);
                                       for (const d of detail) {
-                                          if (d.p) {
+                                          if (d.isCombo && d.combo) {
+                                              const newComboStock = (d.combo.stock || 0) - d.q;
+                                              await supabaseService.updateShopComboStock(d.combo.id, newComboStock);
+                                          } else if (d.p) {
                                               await supabaseService.updateShopProductStock(d.p.id, d.p.stock - d.q);
                                               const outMove = {
                                                   id: Date.now().toString() + '_out_' + d.p.id,
@@ -3090,8 +3268,12 @@ export default function App() {
 
                                       setOrders([newOrder, ...orders]);
                                       setProducts(products.map(p => {
-                                          const d = detail.find(x => x.p && x.p.id === p.id);
+                                          const d = detail.find(x => !x.isCombo && x.p && x.p.id === p.id);
                                           return d ? { ...p, stock: p.stock - d.q } : p;
+                                      }));
+                                      setCombos(combos.map(c => {
+                                          const d = detail.find(x => x.isCombo && x.comboId === c.id);
+                                          return d ? { ...c, stock: (c.stock || 0) - d.q } : c;
                                       }));
                                       alert('Tạo đơn hàng thành công!');
                                       setOrdForm({ channel: 'Shopee', name: '', phone: '', address: '', productId: '', qty: '1', deposit: '', depositAccountId: AccountType.MB, shipping: '', voucher: '', paymentFee: '', status: 'Chưa Gửi Hàng', paymentMethod: 'Đang Thanh Toán' });

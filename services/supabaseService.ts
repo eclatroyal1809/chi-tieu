@@ -356,6 +356,8 @@ export const getShopCombos = async (shopId: string): Promise<any[]> => {
         shopId: c.shop_id,
         name: c.name,
         price: Number(c.price),
+        cost: Number(c.cost || 0),
+        stock: Number(c.stock || 0),
         description: c.description,
         items: typeof c.items === 'string' ? JSON.parse(c.items) : c.items,
         createdAt: c.created_at
@@ -368,10 +370,17 @@ export const addShopCombo = async (combo: any) => {
         shop_id: combo.shopId,
         name: combo.name,
         price: combo.price,
+        cost: combo.cost || 0,
+        stock: combo.stock || 0,
         description: combo.description,
         items: Array.isArray(combo.items) ? JSON.stringify(combo.items) : combo.items,
         created_at: new Date().toISOString()
     });
+    if (error) throw error;
+};
+
+export const updateShopComboStock = async (comboId: string, newStock: number) => {
+    const { error } = await supabase.from('shop_combos').update({ stock: newStock }).eq('id', comboId);
     if (error) throw error;
 };
 
