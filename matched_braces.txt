@@ -1,0 +1,9 @@
+                                <h4 className="font-black text-slate-800 text-lg mb-1">{brand}</h4>
+                                    {goldBrands.map(b => <option key={b} value={b}>{b}</option>)}
+                                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{date}</h4>
+                                                <div className="text-slate-600">Giá gốc: <span className="font-bold">{originalText}</span></div>
+                                                <div className="text-slate-600">Giá bán: <span className="font-bold text-slate-800">{sellingText}</span></div>
+                                                      <option key={s} value={s}>{s}</option>
+                                                      <option key={s} value={s}>{s}</option>
+                                      <option key={cat} value={cat}>{cat}</option>
+                <p className="text-slate-500 text-sm mb-8 leading-relaxed">{configError}</p>

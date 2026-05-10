@@ -2432,7 +2432,7 @@ export default function App() {
                                   Xác nhận & Đóng gói Combo
                               </button>
                           </div>
-                      )})}
+                      ); })()}
 
                       <div className="space-y-4">
                           {filteredCombos.length === 0 ? (
