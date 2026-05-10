@@ -2182,8 +2182,12 @@ export default function App() {
           if (!comboForm.name || !comboForm.price) return alert('Vui lòng nhập đủ tên và giá combo');
           if (comboForm.items.some(i => !i.productId || !i.qty)) return alert('Vui lòng chọn sản phẩm và số lượng cho combo');
           
+          setIsLoading(true);
           const pQty = parseInt(comboForm.packQty) || 1;
-          if (pQty <= 0) return alert('Số lượng đóng gói phải lớn hơn 0');
+          if (pQty <= 0) {
+              setIsLoading(false);
+              return alert('Số lượng đóng gói phải lớn hơn 0');
+          }
 
           // Check stock and calculate cost
           let totalCostPerUnit = 0;
@@ -2191,16 +2195,20 @@ export default function App() {
           
           for (const item of comboForm.items) {
               const p = products.find(pp => pp.id === item.productId);
-              if (!p) return alert('Không tìm thấy sản phẩm thành phần');
+              if (!p) {
+                  setIsLoading(false);
+                  return alert('Không tìm thấy sản phẩm thành phần');
+              }
               const needed = (parseInt(item.qty) || 1) * pQty;
               
-              const pName = p.name.trim().toLowerCase();
-              const lots = products.filter(pp => pp.name.trim().toLowerCase() === pName && pp.shopId === activeShop && pp.stock > 0)
-                                   .sort((a, b) => new Date(a.importDate).getTime() - new Date(b.importDate).getTime());
+              const pName = String(p.name || '').trim().toLowerCase();
+              const lots = products.filter(pp => String(pp.name || '').trim().toLowerCase() === pName && pp.shopId === activeShop && pp.stock > 0)
+                                   .sort((a, b) => new Date(a.importDate || Date.now()).getTime() - new Date(b.importDate || Date.now()).getTime());
               
               const totalAvailable = lots.reduce((acc, curr) => acc + curr.stock, 0);
               
               if (totalAvailable < needed) {
+                  setIsLoading(false);
                   return alert(`Sản phẩm [${p.name}] không đủ tồn kho trong các lô (Cần ${needed}, Hiện có tổng ${totalAvailable})`);
               }
               
@@ -2216,13 +2224,14 @@ export default function App() {
               }
               
               if (remaining > 0) {
+                  setIsLoading(false);
                   return alert(`Lỗi: Không thể phân bổ tồn kho. Lô cho [${p.name}] có thể đã bị thay đổi.`);
               }
               
               totalCostPerUnit += costForThisItem / pQty;
           }
 
-          const existingCombo = combos.find(c => c.name.trim().toLowerCase() === comboForm.name.trim().toLowerCase() && c.shopId === activeShop);
+          const existingCombo = combos.find(c => String(c.name || '').trim().toLowerCase() === String(comboForm.name || '').trim().toLowerCase() && c.shopId === activeShop);
 
           try {
               if (existingCombo) {
@@ -2292,9 +2301,15 @@ export default function App() {
 
               setComboForm({ name: '', price: '', description: '', packQty: '1', items: [{ productId: '', qty: '1' }] });
               setShowComboCreator(false);
-          } catch (error) {
+          } catch (error: any) {
               console.error("Error adding/packaging combo:", error);
-              alert("Lỗi khi thao tác combo");
+              if (error?.code === '42P01') {
+                  alert("Bảng 'shop_combos' chưa được tạo trên Supabase!\n\nVui lòng vào Supabase SQL Editor và chạy lệnh sau:\n\nCREATE TABLE shop_combos (\n  id TEXT PRIMARY KEY,\n  shop_id TEXT,\n  name TEXT,\n  price NUMERIC,\n  cost NUMERIC,\n  stock INT,\n  description TEXT,\n  items JSONB,\n  created_at TIMESTAMPTZ\n);");
+              } else {
+                  alert("Lỗi khi thao tác combo: " + (error?.message || JSON.stringify(error)));
+              }
+          } finally {
+              setIsLoading(false);
           }
       };
 
@@ -3171,6 +3186,7 @@ export default function App() {
                                       alert('Vui lòng thêm ít nhất 1 sản phẩm hoặc combo');
                                       return;
                                   }
+                                  setIsLoading(true);
                                   const isShopeeLocal = ordForm.channel === 'Shopee';
                                   const detail = ordItems.filter(i=>(i.productId || i.comboId)).map(i => {
                                       if (i.isCombo) {
@@ -3192,17 +3208,45 @@ export default function App() {
                                       return { p, q, price, total: q * price, productId: i.productId, isCombo: false };
                                   });
                                   if (detail.length === 0) {
+                                      setIsLoading(false);
                                       alert('Danh sách sản phẩm không hợp lệ');
                                       return;
                                   }
+                                  
+                                  // Process stock verification and collect lot updates
+                                  let hasStockError = false;
+                                  const productUpdates: any[] = [];
+                                  
                                   for (const d of detail) {
                                       if (d.isCombo) {
-                                          if (!d.combo) { alert('Combo không hợp lệ'); return; }
-                                          if (d.q > (d.combo.stock || 0)) { alert(`Số lượng vượt tồn combo: ${d.combo.name}`); return; }
+                                          if (!d.combo) { alert('Combo không hợp lệ'); hasStockError = true; break; }
+                                          if (d.q > (d.combo.stock || 0)) { alert(`Số lượng vượt tồn combo: ${d.combo.name}`); hasStockError = true; break; }
                                       } else {
-                                          if (!d.p) { alert('Sản phẩm không hợp lệ'); return; }
-                                          if (d.q > d.p.stock) { alert(`Số lượng vượt tồn: ${d.p.name}`); return; }
+                                          if (!d.p) { alert('Sản phẩm không hợp lệ'); hasStockError = true; break; }
+                                          const pName = String(d.p.name || '').trim().toLowerCase();
+                                          const lots = products.filter(pp => String(pp.name || '').trim().toLowerCase() === pName && pp.shopId === activeShop && pp.stock > 0)
+                                                               .sort((a, b) => new Date(a.importDate || Date.now()).getTime() - new Date(b.importDate || Date.now()).getTime());
+                                          const totalAvailable = lots.reduce((acc, curr) => acc + curr.stock, 0);
+                                          
+                                          if (totalAvailable < d.q) {
+                                              alert(`Sản phẩm [${d.p.name}] không đủ tồn kho trong các lô (Cần ${d.q}, Hiện có tổng ${totalAvailable})`);
+                                              hasStockError = true;
+                                              break;
+                                          }
+                                          
+                                          let remaining = d.q;
+                                          for (const lot of lots) {
+                                              if (remaining <= 0) break;
+                                              const deduct = Math.min(lot.stock, remaining);
+                                              remaining -= deduct;
+                                              productUpdates.push({ id: lot.id, oldStock: lot.stock, used: deduct, name: lot.name, unitPrice: d.price, isCombo: false });
+                                          }
                                       }
+                                  }
+                                  
+                                  if (hasStockError) {
+                                      setIsLoading(false);
+                                      return;
                                   }
                                   const total = detail.reduce((s,d)=>s+d.total,0);
                                   const voucherLocal = parseSmartAmount(ordForm.voucher) || 0;
@@ -3244,22 +3288,23 @@ export default function App() {
                                           if (d.isCombo && d.combo) {
                                               const newComboStock = (d.combo.stock || 0) - d.q;
                                               await supabaseService.updateShopComboStock(d.combo.id, newComboStock);
-                                          } else if (d.p) {
-                                              await supabaseService.updateShopProductStock(d.p.id, d.p.stock - d.q);
-                                              const outMove = {
-                                                  id: Date.now().toString() + '_out_' + d.p.id,
-                                                  shopId: activeShop,
-                                                  productId: d.p.id,
-                                                  type: 'OUT',
-                                                  qty: d.q,
-                                                  unitCost: 0,
-                                                  sellingPrice: d.price,
-                                                  reason: 'order',
-                                                  refId: newOrder.id,
-                                                  date: newOrder.date
-                                              };
-                                              await supabaseService.addShopStockMove(outMove);
                                           }
+                                      }
+                                      for (const u of productUpdates) {
+                                          await supabaseService.updateShopProductStock(u.id, u.oldStock - u.used);
+                                          const outMove = {
+                                              id: Date.now().toString() + '_out_' + u.id,
+                                              shopId: activeShop,
+                                              productId: u.id,
+                                              type: 'OUT',
+                                              qty: u.used,
+                                              unitCost: 0,
+                                              sellingPrice: u.unitPrice,
+                                              reason: 'order',
+                                              refId: newOrder.id,
+                                              date: newOrder.date
+                                          };
+                                          await supabaseService.addShopStockMove(outMove);
                                       }
 
                                       if (newOrder.deposit > 0 && ordForm.depositAccountId) {
@@ -3308,6 +3353,8 @@ export default function App() {
                                   } catch (error) {
                                       console.error('Error creating multi order:', error);
                                       alert('Lỗi khi tạo đơn hàng');
+                                  } finally {
+                                      setIsLoading(false);
                                   }
                               }} className="w-full bg-slate-800 text-white font-bold py-4 rounded-b-2xl rounded-t-none border-t border-slate-700 hover:bg-slate-700 active:bg-slate-900 transition-colors flex items-center justify-center gap-2">
                                   Tạo đơn ngay
