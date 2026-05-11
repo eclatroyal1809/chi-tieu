@@ -135,6 +135,9 @@ export default function App() {
   const [invForm, setInvForm] = useState({ name: '', originalPrice: '', sellingPrice: '', stock: '1', date: new Date(), accountId: AccountType.MB });
   const [ordForm, setOrdForm] = useState({ channel: 'Shopee', name: '', phone: '', address: '', productId: '', qty: '1', deposit: '', depositAccountId: AccountType.MB, shipping: '', voucher: '', paymentFee: '', status: 'Chưa Gửi Hàng', paymentMethod: 'Đang Thanh Toán' });
   const [orderToDelete, setOrderToDelete] = useState<string|null>(null);
+  const [productToDelete, setProductToDelete] = useState<string|null>(null);
+  const [comboToDelete, setComboToDelete] = useState<string|null>(null);
+  const [financeToDelete, setFinanceToDelete] = useState<string|null>(null);
   const [ordItems, setOrdItems] = useState<{productId: string, qty: string, price?: string}[]>([
     { productId: '', qty: '1', price: '' },
     { productId: '', qty: '1', price: '' }
@@ -2154,7 +2157,7 @@ export default function App() {
                     date: newProd.importDate
                 };
                 await supabaseService.addShopFinance(newFinance);
-                setShopFinances([newFinance, ...shopFinances]);
+                setShopFinances(prev => [newFinance, ...prev]);
                 const stockMove = {
                     id: Date.now().toString() + '_in',
                     shopId: activeShop,
@@ -2543,17 +2546,28 @@ export default function App() {
                                                 </button>
                                                 <button 
                                                     onClick={async () => {
-                                                        if (!window.confirm(`Xoá combo "${combo.name}"? (Lưu ý: Thao tác này không hoàn lại tồn kho đã trừ)`)) return;
+                                                        if (comboToDelete !== combo.id) {
+                                                            setComboToDelete(combo.id);
+                                                            return;
+                                                        }
                                                         try {
                                                             await supabaseService.deleteShopCombo(combo.id);
                                                             setCombos(combos.filter(c => c.id !== combo.id));
+                                                            setComboToDelete(null);
+                                                            alert('Đã xoá combo');
                                                         } catch (e) {
                                                             alert('Lỗi khi xoá combo');
+                                                            setComboToDelete(null);
                                                         }
                                                     }}
-                                                    className="w-8 h-8 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center hover:bg-rose-500 hover:text-white transition-all active:scale-90"
+                                                    className={`h-8 px-3 rounded-full transition-all active:scale-90 flex items-center justify-center gap-1 text-[11px] font-bold ${
+                                                        comboToDelete === combo.id
+                                                        ? 'bg-red-500 text-white shadow-lg'
+                                                        : 'bg-rose-50 text-rose-500 hover:bg-rose-500 hover:text-white'
+                                                    }`}
                                                 >
                                                     <span className="material-symbols-rounded text-lg">delete</span>
+                                                    {comboToDelete === combo.id ? 'Xác nhận?' : ''}
                                                 </button>
                                               </div>
                                           </div>
@@ -2672,7 +2686,7 @@ export default function App() {
                                                                         date: new Date().toISOString()
                                                                     };
                                                                     await supabaseService.addShopFinance(newFinance);
-                                                                    setShopFinances([newFinance, ...shopFinances]);
+                                                                    setShopFinances(prev => [newFinance, ...prev]);
                                                                 }
                                                                 const move = {
                                                                     id: Date.now().toString() + '_in',
@@ -2701,23 +2715,31 @@ export default function App() {
                                                     </button>
                                                     <button
                                                         onClick={async () => {
+                                                            if (productToDelete !== p.id) {
+                                                                setProductToDelete(p.id);
+                                                                return;
+                                                            }
                                                             const hasOrders = orders.some(o => o.productId === p.id);
-                                                            const ok = window.confirm(hasOrders ? 'Sản phẩm đã có đơn hàng. Xoá vẫn giữ lịch sử đơn. Bạn chắc chắn xoá?' : 'Xoá sản phẩm này khỏi kho?');
-                                                            if (!ok) return;
                                                             try {
                                                                 await supabaseService.deleteShopProduct(p.id);
                                                                 setProducts(prev => prev.filter(x => x.id !== p.id));
+                                                                setProductToDelete(null);
                                                                 alert('Đã xoá sản phẩm');
                                                             } catch (error) {
                                                                 console.error('Error deleting product:', error);
                                                                 alert('Lỗi khi xoá sản phẩm');
+                                                                setProductToDelete(null);
                                                             }
                                                         }}
-                                                        className="px-3 py-1.5 text-xs font-bold rounded-lg bg-rose-50 text-rose-600 border border-rose-200 active:scale-95 transition-all flex items-center gap-1"
+                                                        className={`px-3 py-1.5 text-[11px] font-bold rounded-lg active:scale-95 transition-all flex items-center gap-1 border ${
+                                                            productToDelete === p.id 
+                                                            ? 'bg-red-500 text-white border-red-600 shadow-md' 
+                                                            : 'bg-rose-50 text-rose-600 border-rose-200'
+                                                        }`}
                                                         title="Xoá sản phẩm"
                                                     >
                                                         <span className="material-symbols-rounded text-sm">delete</span>
-                                                        Xoá
+                                                        {productToDelete === p.id ? 'Xác nhận xoá?' : 'Xoá'}
                                                     </button>
                                                 </div>
                                             </div>
@@ -3712,14 +3734,17 @@ export default function App() {
           };
           
       try {
+          setIsLoading(true);
           await supabaseService.addShopFinance(newFinance);
-          setShopFinances([newFinance, ...shopFinances]);
+          setShopFinances(prev => [newFinance, ...prev]);
           setFinForm({ type: 'INCOME', amount: '', desc: '', category: 'Khác', date: new Date(), accountId: AccountType.MB });
       } catch (error) {
-              console.error("Error adding finance:", error);
-              alert("Lỗi khi thêm giao dịch");
-          }
-      };
+          console.error("Error adding finance:", error);
+          alert("Lỗi khi thêm giao dịch");
+      } finally {
+          setIsLoading(false);
+      }
+  };
 
       return (
           <div className="space-y-6 animate-fade-in pb-10">
@@ -3853,19 +3878,54 @@ export default function App() {
                                       </p>
                                       <button
                                           onClick={async () => {
-                                              if (!window.confirm('Xoá giao dịch này? Hệ thống sẽ cập nhật lại số dư tương ứng.')) return;
+                                              if (financeToDelete !== f.id) {
+                                                  setFinanceToDelete(f.id);
+                                                  return;
+                                              }
+                                              setIsLoading(true);
                                               try {
+                                                  // 1. Delete from Supabase
                                                   await supabaseService.deleteShopFinance(f.id);
-                                                  setShopFinances(shopFinances.filter(x => x.id !== f.id));
-                                                  alert('Đã xoá giao dịch');
-                                              } catch (err) {
+                                                  
+                                                  // 2. Check and delete corresponding transaction in wallet if it shares the same ID
+                                                  const relatedTx = transactions.find(tx => tx.id === f.id);
+                                                  if (relatedTx) {
+                                                      await supabaseService.deleteTransaction(f.id);
+                                                      setTransactions(prev => prev.filter(t => t.id !== f.id));
+                                                      // Update account balance
+                                                      setAccounts(prev => prev.map(a => {
+                                                          if (a.id === relatedTx.accountId) {
+                                                              const diff = relatedTx.type === TransactionType.INCOME ? -relatedTx.amount : relatedTx.amount;
+                                                              return { ...a, balance: a.balance + diff };
+                                                          }
+                                                          return a;
+                                                      }));
+                                                  }
+                                                  
+                                                  // 3. Update local state
+                                                  setShopFinances(prev => prev.filter(x => x.id !== f.id));
+                                                  setFinanceToDelete(null);
+                                                  alert('Đã xoá giao dịch thành công!');
+                                              } catch (err: any) {
                                                   console.error('Delete finance error', err);
-                                                  alert('Lỗi khi xoá giao dịch');
+                                                  setFinanceToDelete(null);
+                                                  if (err?.code === '42501') {
+                                                      alert("Lỗi bảo mật (RLS)!\n\nVui lòng chạy lệnh sau trong Supabase SQL Editor:\n\nCREATE POLICY \"Enable all\" ON shop_finances FOR ALL USING (true) WITH CHECK (true);");
+                                                  } else {
+                                                      alert('Lỗi khi xoá giao dịch');
+                                                  }
+                                              } finally {
+                                                  setIsLoading(false);
                                               }
                                           }}
-                                          className="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity px-2 py-1 text-[11px] font-bold rounded-lg bg-rose-50 text-rose-600 hover:bg-rose-100 active:scale-95"
+                                          className={`flex items-center gap-1 transition-all px-2 py-1 text-[11px] font-bold rounded-lg ${
+                                              financeToDelete === f.id
+                                              ? 'bg-red-500 text-white shadow-md'
+                                              : 'bg-rose-50 text-rose-600 hover:bg-rose-100 active:scale-95 sm:opacity-0 group-hover:opacity-100'
+                                          }`}
                                       >
-                                          <span className="material-symbols-rounded text-[14px]">delete</span> Xoá
+                                          <span className="material-symbols-rounded text-[14px]">delete</span>
+                                          {financeToDelete === f.id ? 'Xác nhận xoá?' : 'Xoá'}
                                       </button>
                                   </div>
                               </div>
