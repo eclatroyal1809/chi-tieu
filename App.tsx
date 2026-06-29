@@ -2909,7 +2909,7 @@ export default function App() {
       const totalOrder = detailPreview.reduce((s, d) => s + d.total, 0);
       const voucher = parseSmartAmount(ordForm.voucher) || 0;
       const baseForFee = Math.max(0, totalOrder - voucher);
-      const fixedFee = isShopee ? baseForFee * 0.14 : 0;
+      const fixedFee = isShopee ? baseForFee * 0.17 : 0;
       const serviceFee = isShopee ? 3000 : 0;
       const vat = isShopee ? baseForFee * 0.01 : 0;
       const pit = isShopee ? baseForFee * 0.005 : 0;
@@ -3179,7 +3179,7 @@ export default function App() {
                                               <span className="font-bold text-[13px]">{formatCurrency(baseForFee)}</span>
                                           </div>
                                           <div className="flex justify-between items-center text-orange-600/80">
-                                              <span>Phí cố định 14%:</span>
+                                              <span>Phí cố định 17%:</span>
                                               <span className="font-semibold">-{formatCurrency(fixedFee)}</span>
                                           </div>
                                           <div className="flex justify-between items-center text-orange-600/80">
@@ -3282,7 +3282,7 @@ export default function App() {
                                   const total = detail.reduce((s,d)=>s+d.total,0);
                                   const voucherLocal = parseSmartAmount(ordForm.voucher) || 0;
                                   const baseForFeeLocal = Math.max(0, total - voucherLocal);
-                                  const fixedFeeLocal = isShopeeLocal ? baseForFeeLocal * 0.14 : 0;
+                                  const fixedFeeLocal = isShopeeLocal ? baseForFeeLocal * 0.17 : 0;
                                   const serviceFeeLocal = isShopeeLocal ? 3000 : 0;
                                   const vatLocal = isShopeeLocal ? baseForFeeLocal * 0.01 : 0;
                                   const pitLocal = isShopeeLocal ? baseForFeeLocal * 0.005 : 0;
@@ -3655,7 +3655,7 @@ export default function App() {
                                               sum.style.fontSize = '12px';
                                               const voucher = o.voucher || 0;
                                               const baseForFee = Math.max(0, subtotal - voucher);
-                                              const fixedFee = o.channel === 'Shopee' ? baseForFee * 0.14 : 0;
+                                              const fixedFee = o.channel === 'Shopee' ? baseForFee * 0.17 : 0;
                                               const serviceFee = o.channel === 'Shopee' ? 3000 : 0;
                                               const vat = o.channel === 'Shopee' ? baseForFee * 0.01 : 0;
                                               const pit = o.channel === 'Shopee' ? baseForFee * 0.005 : 0;
@@ -3667,7 +3667,7 @@ export default function App() {
                                                     <div style="display:flex;justify-content:space-between"><span>Tạm tính</span><strong>${new Intl.NumberFormat('vi-VN').format(subtotal)}</strong></div>
                                                     <div style="display:flex;justify-content:space-between"><span>Voucher</span><strong>-${new Intl.NumberFormat('vi-VN').format(voucher)}</strong></div>
                                                     ${o.channel === 'Shopee' ? `
-                                                    <div style="display:flex;justify-content:space-between"><span>Phí cố định (14%)</span><strong>-${new Intl.NumberFormat('vi-VN').format(fixedFee)}</strong></div>
+                                                    <div style="display:flex;justify-content:space-between"><span>Phí cố định (17%)</span><strong>-${new Intl.NumberFormat('vi-VN').format(fixedFee)}</strong></div>
                                                     <div style="display:flex;justify-content:space-between"><span>Phí dịch vụ</span><strong>-${new Intl.NumberFormat('vi-VN').format(serviceFee)}</strong></div>
                                                     <div style="display:flex;justify-content:space-between"><span>Thuế GTGT (1%)</span><strong>-${new Intl.NumberFormat('vi-VN').format(vat)}</strong></div>
                                                     <div style="display:flex;justify-content:space-between"><span>Thuế TNCN (0.5%)</span><strong>-${new Intl.NumberFormat('vi-VN').format(pit)}</strong></div>
