@@ -97,8 +97,8 @@ export const MonthlyStats: React.FC<MonthlyStatsProps> = ({ transactions }) => {
                 <stop offset="95%" stopColor="#34c759" stopOpacity={0}/>
               </linearGradient>
               <linearGradient id="appleExpenseGrad" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="5%" stopColor="#0071e3" stopOpacity={0.2}/>
-                <stop offset="95%" stopColor="#0071e3" stopOpacity={0}/>
+                <stop offset="5%" stopColor="#1d1d1f" stopOpacity={0.2}/>
+                <stop offset="95%" stopColor="#1d1d1f" stopOpacity={0}/>
               </linearGradient>
             </defs>
             <XAxis 
@@ -111,16 +111,16 @@ export const MonthlyStats: React.FC<MonthlyStatsProps> = ({ transactions }) => {
             <YAxis hide domain={[0, 'auto']} />
             <Tooltip 
               contentStyle={{ 
-                backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                backgroundColor: 'rgba(29, 29, 31, 0.95)',
                 backdropFilter: 'blur(10px)',
                 borderRadius: '14px', 
-                border: '1px solid rgba(0, 0, 0, 0.06)', 
-                color: '#1d1d1f',
+                border: 'none', 
+                color: '#fff',
                 fontSize: '12px',
                 padding: '8px 12px',
-                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.08)'
+                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.2)'
               }}
-              itemStyle={{ color: '#1d1d1f', padding: '2px 0' }}
+              itemStyle={{ color: '#fff', padding: '2px 0' }}
               formatter={(value: number) => [formatCurrency(value), '']}
               labelFormatter={(label) => `Ngày ${label}`}
             />
@@ -136,7 +136,7 @@ export const MonthlyStats: React.FC<MonthlyStatsProps> = ({ transactions }) => {
             <Area 
               type="monotone" 
               dataKey="expense" 
-              stroke="#0071e3" 
+              stroke="#1d1d1f" 
               strokeWidth={2}
               fillOpacity={1} 
               fill="url(#appleExpenseGrad)" 

@@ -5,7 +5,6 @@ import { AccountCard } from './components/AccountCard';
 import { BillGenerator } from './components/BillGenerator';
 import { MonthlyStats } from './components/MonthlyStats';
 import { QRScannerModal } from './components/QRScannerModal';
-import { ApplePayModal } from './components/ApplePayModal';
 import * as supabaseService from './services/supabaseService';
 import { supabase } from './supabaseClient';
 import { motion, AnimatePresence } from 'motion/react';
@@ -38,7 +37,6 @@ export default function App() {
   const [showBill, setShowBill] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [showQRScanner, setShowQRScanner] = useState(false);
-  const [showApplePayGuide, setShowApplePayGuide] = useState(false);
   
   // Delete Confirmation State
   const [deletingTx, setDeletingTx] = useState<Transaction | null>(null);
@@ -134,42 +132,6 @@ export default function App() {
 
     loadData();
   }, [activeShop]);
-
-  // Handle incoming Apple Shortcuts / Apple Pay Automation URL params
-  // Format: ?amount=50000&desc=Highlands%20Coffee&wallet=TCB
-  useEffect(() => {
-    try {
-      const search = window.location.search;
-      if (!search) return;
-      const params = new URLSearchParams(search);
-      const amountParam = params.get('amount') || params.get('am');
-      const descParam = params.get('desc') || params.get('merchant') || params.get('tn');
-      const walletParam = (params.get('wallet') || params.get('bank') || '').toUpperCase();
-
-      if (amountParam) {
-        const raw = amountParam.replace(/\D/g, '');
-        if (raw) {
-          setQaAmount(formatNumberInput(raw));
-        }
-      }
-      if (descParam) {
-        setQaDesc(decodeURIComponent(descParam));
-      }
-      if (walletParam === 'TCB' || walletParam === 'TECHCOMBANK') {
-        setQaAccount(AccountType.TCB);
-      } else if (walletParam === 'MB' || walletParam === 'MBBANK') {
-        setQaAccount(AccountType.MB);
-      }
-
-      if (amountParam || descParam) {
-        setActiveTab('home');
-        // Clean URL params cleanly without reloading
-        window.history.replaceState({}, '', window.location.pathname);
-      }
-    } catch (e) {
-      console.warn('Error reading URL params:', e);
-    }
-  }, []);
 
   // Derived Values
   const totalBalance = accounts
@@ -662,29 +624,28 @@ export default function App() {
 
     return (
       <div className="space-y-5 pb-28 pt-2">
-        {/* Apple Frosted Titanium Hero Card (Clean White, No Dark Box) */}
-        <div className="relative overflow-hidden rounded-[28px] bg-white border border-black/[0.06] p-6 text-[#1d1d1f] shadow-[0_8px_30px_rgba(0,0,0,0.04)]">
-          {/* Subtle Apple pearl metallic sheen */}
-          <div className="absolute top-0 right-0 w-64 h-64 bg-gradient-to-bl from-black/[0.02] to-transparent rounded-full -mr-20 -mt-20 pointer-events-none"></div>
+        {/* Apple Wallet Style Hero Card */}
+        <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-[#1c1c1e] via-[#121214] to-[#000000] p-6 text-white shadow-[0_12px_32px_rgba(0,0,0,0.15)] border border-white/[0.08]">
+          <div className="absolute top-0 right-0 w-48 h-48 bg-gradient-to-bl from-white/[0.06] to-transparent rounded-full -mr-16 -mt-16 pointer-events-none blur-2xl"></div>
           
           <div className="relative z-10">
             <div className="flex justify-between items-start mb-5">
               <div>
                 <p className="text-[11px] font-semibold text-[#86868b] uppercase tracking-widest mb-1.5">Tổng tài sản</p>
-                <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-[#1d1d1f] tabular-nums">{formatCurrency(totalBalance)}</h1>
+                <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-white">{formatCurrency(totalBalance)}</h1>
               </div>
               <div className="flex items-center gap-2">
                 <button 
                   onClick={() => setShowQRScanner(true)}
-                  className="h-10 px-3.5 rounded-full bg-[#f5f5f7] hover:bg-[#e8e8ed] border border-black/[0.05] flex items-center gap-1.5 text-[#1d1d1f] active:scale-95 transition-all text-xs font-semibold shadow-sm"
+                  className="h-10 px-3.5 rounded-full bg-white/[0.12] hover:bg-white/[0.2] border border-white/15 flex items-center gap-1.5 text-white active:scale-95 transition-all text-xs font-semibold backdrop-blur-md shadow-sm"
                   title="Quét mã QR để chuyển tiền"
                 >
-                  <span className="material-symbols-rounded text-lg text-[#0071e3]">qr_code_scanner</span>
+                  <span className="material-symbols-rounded text-lg">qr_code_scanner</span>
                   <span>Quét QR</span>
                 </button>
                 <button 
                   onClick={() => setShowBill(true)}
-                  className="w-10 h-10 rounded-full bg-[#f5f5f7] hover:bg-[#e8e8ed] border border-black/[0.05] flex items-center justify-center text-[#1d1d1f] active:scale-95 transition-all shadow-sm"
+                  className="w-10 h-10 rounded-full bg-white/[0.08] hover:bg-white/[0.15] border border-white/10 flex items-center justify-center text-white active:scale-95 transition-all"
                   title="Xem hoá đơn quyết toán"
                 >
                   <span className="material-symbols-rounded text-lg">receipt_long</span>
@@ -693,18 +654,18 @@ export default function App() {
             </div>
 
             {/* Mèo Debt / Credit Status Bar */}
-            <div className="bg-[#f5f5f7] rounded-2xl p-3.5 border border-black/[0.04] flex items-center justify-between gap-3">
+            <div className="bg-white/[0.06] backdrop-blur-md rounded-2xl p-3.5 border border-white/[0.08] flex items-center justify-between gap-3">
               <div className="flex items-center gap-3 min-w-0">
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
-                  isCredit ? 'bg-[#34c759]/15 text-[#34c759]' : 'bg-[#ff9500]/15 text-[#ff9500]'
+                  isCredit ? 'bg-[#34c759]/20 text-[#34c759]' : 'bg-[#ff9500]/20 text-[#ff9500]'
                 }`}>
                   <span className="material-symbols-rounded text-base">{isCredit ? 'account_balance_wallet' : 'person'}</span>
                 </div>
                 <div className="min-w-0">
-                  <p className="text-[10px] uppercase font-semibold text-[#86868b] tracking-wider">
+                  <p className="text-[10px] uppercase font-semibold text-white/50 tracking-wider">
                     {isCredit ? 'Mèo có dư' : 'Mèo đang nợ'}
                   </p>
-                  <p className="text-sm font-semibold tracking-tight text-[#1d1d1f] truncate tabular-nums">
+                  <p className="text-sm font-semibold tracking-tight text-white truncate">
                     {formatCurrency(Math.abs(meoDebt))}
                   </p>
                 </div>
@@ -714,14 +675,14 @@ export default function App() {
               <div className="flex items-center gap-1.5 shrink-0">
                 <button 
                   onClick={handleMeoDeposit}
-                  className="px-3 py-1.5 rounded-full text-xs font-medium bg-white hover:bg-black/5 active:scale-95 text-[#1d1d1f] transition-all flex items-center gap-1 border border-black/[0.06] shadow-sm"
+                  className="px-3 py-1.5 rounded-full text-xs font-medium bg-white/10 hover:bg-white/20 active:scale-95 text-white transition-all flex items-center gap-1 border border-white/10"
                 >
-                  <span className="material-symbols-rounded text-sm text-[#0071e3]">add</span>
+                  <span className="material-symbols-rounded text-sm">add</span>
                   300k
                 </button>
                 <button 
                   onClick={() => setShowBill(true)}
-                  className="px-3.5 py-1.5 rounded-full text-xs font-medium bg-[#1d1d1f] hover:bg-black active:scale-95 text-white transition-all shadow-sm"
+                  className="px-3 py-1.5 rounded-full text-xs font-medium bg-[#0071e3] hover:bg-[#0077ed] active:scale-95 text-white transition-all shadow-sm"
                 >
                   Chốt sổ
                 </button>
@@ -909,14 +870,7 @@ export default function App() {
               <p className="text-[11px] font-semibold uppercase tracking-wider text-[#86868b]">Tài chính cá nhân</p>
               <h3 className="text-base font-semibold text-[#1d1d1f]">Ví & Thẻ của tôi</h3>
             </div>
-            <div className="flex items-center gap-1.5">
-              <button 
-                onClick={() => setShowApplePayGuide(true)}
-                className="text-xs font-semibold text-[#1d1d1f] bg-black/[0.05] hover:bg-black/10 active:scale-95 px-2.5 py-1.5 rounded-full flex items-center gap-1 transition-all"
-                title="Tự động hóa Apple Pay qua Phím tắt iOS"
-              >
-                <span> Pay</span>
-              </button>
+            <div className="flex items-center gap-2">
               <button 
                 onClick={() => setShowQRScanner(true)}
                 className="text-xs font-semibold text-[#0071e3] bg-[#0071e3]/10 hover:bg-[#0071e3]/15 active:scale-95 px-3 py-1.5 rounded-full flex items-center gap-1 transition-all"
@@ -926,7 +880,7 @@ export default function App() {
               </button>
               <button 
                 onClick={() => setShowTransfer(true)}
-                className="text-xs font-medium text-[#1d1d1f] bg-white border border-black/[0.08] active:bg-[#f5f5f7] px-3.5 py-1.5 rounded-full flex items-center gap-1 transition-all active:scale-95 shadow-sm"
+                className="text-xs font-medium text-[#1d1d1f] bg-white border border-black/[0.08] active:bg-[#f5f5f7] px-3 py-1.5 rounded-full flex items-center gap-1 transition-all active:scale-95 shadow-sm"
               >
                 <span className="material-symbols-rounded text-base">swap_horiz</span>
                 Chuyển ví
@@ -1206,20 +1160,19 @@ export default function App() {
         {/* Sub-view: Finance */}
         {shopView === 'finance' && (
           <div className="space-y-4">
-            {/* Profit Card (Apple White Titanium) */}
-            <div className="bg-white rounded-3xl p-6 text-[#1d1d1f] shadow-[0_4px_24px_rgba(0,0,0,0.03)] border border-black/[0.06] relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-48 h-48 bg-gradient-to-bl from-black/[0.02] to-transparent rounded-full -mr-16 -mt-16 pointer-events-none"></div>
+            {/* Profit Card */}
+            <div className="bg-gradient-to-br from-[#1c1c1e] to-[#000000] rounded-3xl p-6 text-white shadow-sm border border-white/10">
               <p className="text-[11px] font-semibold text-[#86868b] uppercase tracking-wider mb-1">Lợi nhuận ròng</p>
-              <h3 className="text-3xl font-semibold tracking-tight text-[#1d1d1f] mb-4 tabular-nums">{formatCurrency(shopProfit)}</h3>
+              <h3 className="text-3xl font-semibold tracking-tight text-white mb-4">{formatCurrency(shopProfit)}</h3>
               
-              <div className="grid grid-cols-2 gap-3 pt-3 border-t border-black/[0.06] text-xs">
+              <div className="grid grid-cols-2 gap-3 pt-3 border-t border-white/10 text-xs">
                 <div>
                   <span className="text-[#86868b] block mb-0.5">Tổng thu</span>
-                  <span className="font-semibold text-[#34c759] tabular-nums">{formatCurrency(shopIncome)}</span>
+                  <span className="font-semibold text-[#34c759]">{formatCurrency(shopIncome)}</span>
                 </div>
                 <div>
                   <span className="text-[#86868b] block mb-0.5">Tổng chi</span>
-                  <span className="font-semibold text-[#ff3b30] tabular-nums">{formatCurrency(shopExpense)}</span>
+                  <span className="font-semibold text-[#ff3b30]">{formatCurrency(shopExpense)}</span>
                 </div>
               </div>
             </div>
@@ -1752,12 +1705,6 @@ export default function App() {
             onLogTransaction={handleLogQRTransfer}
             getAmountSuggestions={getAmountSuggestions}
             formatCurrency={formatCurrency}
-        />
-
-        {/* Apple Pay Automation Guide Modal */}
-        <ApplePayModal
-            isOpen={showApplePayGuide}
-            onClose={() => setShowApplePayGuide(false)}
         />
 
         {/* Bill Modal (Creation & History) */}
