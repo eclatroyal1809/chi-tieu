@@ -180,7 +180,12 @@ export function getVietQRDeepLink(params: {
 }): string {
   const { appCode, bankCodeOrBin, accountNumber, amount, note } = params;
   const callbackUrl = window.location.href;
-  const bankParam = bankCodeOrBin.toLowerCase();
+  
+  // Find bank info to resolve standard BIN or short code
+  const bank = VIETNAM_BANKS.find(
+    b => b.code.toLowerCase() === bankCodeOrBin.toLowerCase() || b.bin === bankCodeOrBin
+  );
+  const bankParam = bank ? bank.bin : bankCodeOrBin.toLowerCase();
   const ba = `${accountNumber}@${bankParam}`;
   const encodedNote = encodeURIComponent(note || 'Chuyen tien');
   const encodedCallback = encodeURIComponent(callbackUrl);

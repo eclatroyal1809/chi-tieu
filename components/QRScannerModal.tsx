@@ -1,23 +1,32 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import jsQR from 'jsqr';
 import { parseVietQR, VIETNAM_BANKS, getVietQRDeepLink, getDirectAppScheme, getDynamicVietQRImage, ParsedVietQR } from '../utils/vietqr';
-import { AccountType, TransactionType, SplitType } from '../types';
+import { Account, AccountType, SplitType } from '../types';
+import { SPLIT_OPTIONS } from '../constants';
 
 interface QRScannerModalProps {
   isOpen: boolean;
   onClose: () => void;
+  accounts: Account[];
   onLogTransaction?: (data: {
     amount: number;
     description: string;
     account: AccountType;
+    splitType: SplitType;
+    date: Date;
   }) => void;
   getAmountSuggestions: (val: string) => number[];
   formatCurrency: (amount: number) => string;
 }
 
+const COMMON_NOTES = [
+  'Ăn uống', 'Đi chợ', 'Cà phê', 'Mua sắm', 'Tiền nhà', 'Chuyển tiền'
+];
+
 export const QRScannerModal: React.FC<QRScannerModalProps> = ({
   isOpen,
   onClose,
+  accounts,
   onLogTransaction,
   getAmountSuggestions,
   formatCurrency
@@ -32,12 +41,12 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
   const [hasTorch, setHasTorch] = useState(false);
 
   // Transfer Form States
-  const [parsedData, setParsedData] = useState<ParsedVietQR | null>(null);
   const [selectedBankCode, setSelectedBankCode] = useState<string>('tcb');
   const [accountNumber, setAccountNumber] = useState<string>('');
   const [beneficiaryName, setBeneficiaryName] = useState<string>('');
   const [amountInput, setAmountInput] = useState<string>('');
-  const [note, setNote] = useState<string>('Chuyen tien');
+  const [note, setNote] = useState<string>('Chuyển tiền');
+  const [splitType, setSplitType] = useState<SplitType>(SplitType.SHARED);
   const [selectedPayerBank, setSelectedPayerBank] = useState<'tcb' | 'mb'>('tcb');
   const [autoLogToLedger, setAutoLogToLedger] = useState<boolean>(true);
   const [qrImageUrl, setQrImageUrl] = useState<string>('');
@@ -49,6 +58,10 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const animFrameRef = useRef<number | null>(null);
+
+  // Balances of Techcombank & MB
+  const tcbAccount = accounts.find(a => a.id === AccountType.TCB);
+  const mbAccount = accounts.find(a => a.id === AccountType.MB);
 
   // Stop camera stream cleanly
   const stopCamera = useCallback(() => {
@@ -104,7 +117,6 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
 
-      // Check flashlight support
       const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack) {
         const capabilities = (videoTrack.getCapabilities?.() as { torch?: boolean }) || {};
@@ -141,7 +153,6 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
       });
 
       if (code && code.data) {
-        // Haptic feedback
         try {
           if (navigator.vibrate) navigator.vibrate(50);
         } catch {
@@ -158,8 +169,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
   // Handle scanned QR payload
   const handleScannedCode = (rawPayload: string) => {
     stopCamera();
-    const parsed = parseVietQR(rawPayload);
-    setParsedData(parsed);
+    const parsed: ParsedVietQR = parseVietQR(rawPayload);
     setSelectedBankCode(parsed.bankCode);
     setAccountNumber(parsed.accountNumber);
     setBeneficiaryName(parsed.beneficiaryName || '');
@@ -231,12 +241,14 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
 
     setSelectedPayerBank(targetPayer);
 
+    const transferNote = note.trim() || 'Chuyen tien';
+
     // Generate dynamic QR image for fallback
     const dynamicQr = getDynamicVietQRImage({
       bankCodeOrBin: selectedBankCode,
       accountNumber,
       amount: amountNum,
-      note
+      note: transferNote
     });
     setQrImageUrl(dynamicQr);
 
@@ -246,7 +258,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
       bankCodeOrBin: selectedBankCode,
       accountNumber,
       amount: amountNum,
-      note
+      note: transferNote
     });
 
     // Direct scheme as fallback / direct attempt
@@ -254,10 +266,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
 
     // Attempt to open the app
     try {
-      // First try standard deeplink
       window.location.href = deeplink;
-      
-      // Fallback timer to trigger direct scheme if needed
       setTimeout(() => {
         try {
           window.location.href = directScheme;
@@ -269,15 +278,15 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
       window.open(deeplink, '_blank');
     }
 
-    // If auto log is checked, prepare and record transaction
+    // Auto log transaction to the matching bank wallet with selected splitType
     if (autoLogToLedger && onLogTransaction) {
       const accountType = targetPayer === 'tcb' ? AccountType.TCB : AccountType.MB;
-      const bankInfo = VIETNAM_BANKS.find(b => b.code === selectedBankCode);
-      const desc = `CK ${bankInfo?.shortName || selectedBankCode} - ${beneficiaryName || accountNumber}: ${note}`;
       onLogTransaction({
         amount: amountNum,
-        description: desc,
-        account: accountType
+        description: transferNote,
+        account: accountType,
+        splitType: splitType,
+        date: new Date()
       });
     }
 
@@ -289,11 +298,12 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
     if (isOpen) {
       setStep('scan');
       setCameraError(null);
-      setParsedData(null);
       setAccountNumber('');
       setBeneficiaryName('');
       setAmountInput('');
-      setNote('Chuyen tien');
+      setNote('Chuyển tiền');
+      setSplitType(SplitType.SHARED);
+      setSelectedPayerBank('tcb');
       startCamera();
     } else {
       stopCamera();
@@ -324,7 +334,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
           <div className="flex items-center gap-2">
             <span className="material-symbols-rounded text-xl text-[#0071e3]">qr_code_scanner</span>
             <h3 className="font-semibold text-base text-[#1d1d1f]">
-              {step === 'scan' ? 'Quét mã QR VietQR' : step === 'confirm' ? 'Chuyển tiền qua Ngân hàng' : 'Đang mở ứng dụng...'}
+              {step === 'scan' ? 'Quét mã QR VietQR' : step === 'confirm' ? 'Chuyển tiền & Ghi chép' : 'Đang chuyển qua Ngân hàng...'}
             </h3>
           </div>
           <button 
@@ -371,12 +381,8 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
 
                     {/* Scanner Overlay UI */}
                     <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
-                      {/* Targeting Box */}
                       <div className="w-56 h-56 border-2 border-white/60 rounded-3xl relative shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]">
-                        {/* Animated Laser line */}
                         <div className="absolute left-2 right-2 h-0.5 bg-gradient-to-r from-transparent via-[#0071e3] to-transparent animate-pulse top-1/2 -translate-y-1/2"></div>
-                        
-                        {/* Corner markers */}
                         <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-[#0071e3] rounded-tl-lg"></div>
                         <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-[#0071e3] rounded-tr-lg"></div>
                         <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-[#0071e3] rounded-bl-lg"></div>
@@ -442,13 +448,14 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
             </div>
           )}
 
-          {/* STEP 2: FILL AMOUNT & SELECT TECHCOMBANK OR MB BANK */}
+          {/* STEP 2: FILL DETAILS, ALLOCATION & BANK SELECTION */}
           {step === 'confirm' && (
             <div className="space-y-4">
+              
               {/* Recipient Details Card */}
-              <div className="bg-[#f5f5f7] p-4 rounded-2xl border border-black/[0.04] space-y-3">
+              <div className="bg-[#f5f5f7] p-3.5 rounded-2xl border border-black/[0.04] space-y-2.5">
                 <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-semibold text-[#86868b] uppercase tracking-wider">Tài khoản nhận</span>
+                  <span className="text-[10px] font-semibold text-[#86868b] uppercase tracking-wider">Người thụ hưởng</span>
                   <span className="text-[10px] font-semibold text-[#0071e3] bg-[#0071e3]/10 px-2 py-0.5 rounded-full">
                     VietQR 24/7
                   </span>
@@ -456,7 +463,6 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
 
                 {/* Bank Selector */}
                 <div>
-                  <label className="text-[10px] text-[#86868b] font-medium block mb-1">Ngân hàng thụ hưởng</label>
                   <select
                     value={selectedBankCode}
                     onChange={(e) => setSelectedBankCode(e.target.value)}
@@ -470,15 +476,14 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                   </select>
                 </div>
 
-                {/* Account Number */}
+                {/* Account Number & Copy */}
                 <div className="flex items-center gap-2">
                   <div className="flex-1">
-                    <label className="text-[10px] text-[#86868b] font-medium block mb-0.5">Số tài khoản</label>
                     <input
                       type="text"
                       value={accountNumber}
                       onChange={(e) => setAccountNumber(e.target.value.replace(/\s+/g, ''))}
-                      placeholder="Nhập số tài khoản thụ hưởng"
+                      placeholder="Số tài khoản thụ hưởng"
                       className="w-full bg-white border border-black/[0.06] rounded-xl px-3 py-2 text-xs font-semibold text-[#1d1d1f] outline-none font-mono tracking-wider"
                     />
                   </div>
@@ -490,7 +495,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                         setCopiedAccount(true);
                         setTimeout(() => setCopiedAccount(false), 2000);
                       }}
-                      className="mt-4 px-3 py-2 bg-white border border-black/[0.06] rounded-xl text-xs font-medium text-[#1d1d1f] hover:bg-black/5 active:scale-95 transition-all flex items-center gap-1"
+                      className="px-3 py-2 bg-white border border-black/[0.06] rounded-xl text-xs font-medium text-[#1d1d1f] hover:bg-black/5 active:scale-95 transition-all flex items-center gap-1"
                     >
                       <span className="material-symbols-rounded text-sm">
                         {copiedAccount ? 'check' : 'content_copy'}
@@ -502,12 +507,9 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
 
                 {/* Beneficiary Name if present */}
                 {beneficiaryName && (
-                  <div>
-                    <label className="text-[10px] text-[#86868b] font-medium block mb-0.5">Người thụ hưởng</label>
-                    <p className="text-xs font-semibold uppercase text-[#1d1d1f] bg-white px-3 py-2 rounded-xl border border-black/[0.06]">
-                      {beneficiaryName}
-                    </p>
-                  </div>
+                  <p className="text-xs font-semibold uppercase text-[#1d1d1f] bg-white px-3 py-1.5 rounded-xl border border-black/[0.06]">
+                    {beneficiaryName}
+                  </p>
                 )}
               </div>
 
@@ -517,7 +519,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                   Số tiền chuyển khoản
                 </label>
                 
-                <div className="text-center mb-2">
+                <div className="text-center mb-1.5">
                   <div className="inline-flex items-baseline justify-center">
                     <input
                       type="text"
@@ -560,45 +562,174 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                 </div>
               </div>
 
-              {/* Transfer Note / Message */}
-              <div>
-                <label className="text-[10px] font-semibold text-[#86868b] uppercase tracking-wider block mb-1 px-1">
-                  Nội dung chuyển tiền
-                </label>
-                <input
-                  type="text"
-                  value={note}
-                  onChange={(e) => setNote(e.target.value)}
-                  placeholder="Lời nhắn chuyển tiền"
-                  className="w-full bg-[#f5f5f7] border border-black/[0.06] rounded-2xl px-4 py-3 text-xs font-medium text-[#1d1d1f] outline-none"
-                />
+              {/* Transfer Note & Description (Nội dung chuyển khoản) */}
+              <div className="bg-white p-3.5 rounded-2xl border border-black/[0.06] shadow-sm space-y-2">
+                <div className="flex justify-between items-center">
+                  <label className="text-[10px] font-semibold text-[#86868b] uppercase tracking-wider block">
+                    Nội dung chuyển khoản & Ghi chép
+                  </label>
+                  <span className="text-[10px] text-[#86868b]">{note.length}/50</span>
+                </div>
+                
+                <div className="bg-[#f5f5f7] rounded-xl px-3.5 py-2.5 flex items-center gap-2 border border-black/[0.03]">
+                  <span className="material-symbols-rounded text-[#86868b] text-base">edit_note</span>
+                  <input
+                    type="text"
+                    value={note}
+                    maxLength={50}
+                    onChange={(e) => setNote(e.target.value)}
+                    placeholder="Nhập nội dung chuyển tiền (ví dụ: Ăn trưa, Cà phê...)"
+                    className="w-full text-xs font-semibold text-[#1d1d1f] placeholder-[#86868b]/60 outline-none bg-transparent"
+                  />
+                </div>
+
+                {/* Common Note Chips */}
+                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-0.5">
+                  {COMMON_NOTES.map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setNote(preset)}
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all shrink-0 ${
+                        note === preset
+                          ? 'bg-[#1d1d1f] text-white'
+                          : 'bg-[#f5f5f7] text-[#86868b] hover:text-[#1d1d1f]'
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {/* Auto Log Checkbox */}
-              <label className="flex items-center gap-2.5 px-1 cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={autoLogToLedger}
-                  onChange={(e) => setAutoLogToLedger(e.target.checked)}
-                  className="w-4 h-4 rounded text-[#0071e3] accent-[#1d1d1f] focus:ring-0 cursor-pointer"
-                />
-                <span className="text-xs text-[#1d1d1f] font-medium">
-                  Tự động ghi nhận vào sổ chi tiêu của ví tương ứng
-                </span>
-              </label>
+              {/* Expense Allocation (Phân bổ chi phí chuẩn luồng setup) */}
+              <div className="bg-white p-3.5 rounded-2xl border border-black/[0.06] shadow-sm space-y-2.5">
+                <div className="flex justify-between items-center">
+                  <label className="text-[10px] font-semibold text-[#86868b] uppercase tracking-wider block">
+                    Phân bổ chi phí
+                  </label>
+                  <span className="text-[10px] font-medium text-[#0071e3]">
+                    {SPLIT_OPTIONS.find(o => o.id === splitType)?.desc}
+                  </span>
+                </div>
 
-              {/* Primary Bank Buttons: Techcombank & MB Bank */}
-              <div className="pt-2 space-y-2.5">
-                <p className="text-[11px] font-semibold text-[#86868b] uppercase tracking-wider text-center">
-                  Chọn ứng dụng ngân hàng để chuyển
-                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  {SPLIT_OPTIONS.map((opt) => {
+                    const isSelected = splitType === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setSplitType(opt.id as SplitType)}
+                        className={`p-2.5 rounded-xl text-left border flex items-center gap-2 transition-all active:scale-[0.98] ${
+                          isSelected
+                            ? 'bg-[#0071e3]/10 border-[#0071e3] text-[#0071e3] font-semibold'
+                            : 'bg-[#f5f5f7] border-transparent text-[#1d1d1f] hover:border-black/10'
+                        }`}
+                      >
+                        <span className="material-symbols-rounded text-sm shrink-0">{opt.icon}</span>
+                        <div className="truncate">
+                          <p className="text-xs truncate">{opt.label}</p>
+                          <p className="text-[9px] text-[#86868b] truncate">{opt.desc}</p>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
 
+                {/* Subtext explanation of debt impact */}
+                <div className="bg-[#f5f5f7] px-3 py-2 rounded-xl text-[11px] text-[#86868b] flex items-center gap-1.5">
+                  <span className="material-symbols-rounded text-sm text-[#0071e3]">info</span>
+                  <span>
+                    {splitType === SplitType.SHARED && 'Mèo sẽ chịu 50% số tiền này và tính vào công nợ chốt sổ.'}
+                    {splitType === SplitType.ME_ONLY && 'Khoản chi của riêng bạn, không ảnh hưởng đến nợ của Mèo.'}
+                    {splitType === SplitType.MEO_ONLY && 'Mèo sẽ nợ bạn 100% số tiền này khi chốt sổ.'}
+                    {splitType === SplitType.MEO_PAID && 'Khoản Mèo thanh toán, sẽ được trừ vào số nợ của Mèo.'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Source Wallet & Paying Bank Section (Ví thanh toán tương ứng) */}
+              <div className="bg-white p-3.5 rounded-2xl border border-black/[0.06] shadow-sm space-y-2.5">
+                <div className="flex justify-between items-center">
+                  <label className="text-[10px] font-semibold text-[#86868b] uppercase tracking-wider block">
+                    Ví thanh toán & Ngân hàng chuyển
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={autoLogToLedger}
+                      onChange={(e) => setAutoLogToLedger(e.target.checked)}
+                      className="w-3.5 h-3.5 rounded text-[#0071e3] accent-[#1d1d1f] focus:ring-0 cursor-pointer"
+                    />
+                    <span className="text-[11px] text-[#86868b] font-medium">
+                      Ghi sổ chi tiêu
+                    </span>
+                  </label>
+                </div>
+
+                {/* 2 Interactive Bank Wallet Cards */}
+                <div className="grid grid-cols-2 gap-2.5">
+                  {/* Techcombank Option */}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPayerBank('tcb')}
+                    className={`p-3 rounded-2xl text-left border transition-all active:scale-[0.98] relative overflow-hidden ${
+                      selectedPayerBank === 'tcb'
+                        ? 'border-[#e3001b] bg-[#e3001b]/5 shadow-sm'
+                        : 'border-black/[0.06] bg-[#f5f5f7] hover:border-black/15'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="w-6 h-6 rounded-full bg-[#e3001b] text-white flex items-center justify-center font-bold text-[9px]">
+                        TCB
+                      </div>
+                      {selectedPayerBank === 'tcb' && (
+                        <span className="material-symbols-rounded text-sm text-[#e3001b]">check_circle</span>
+                      )}
+                    </div>
+                    <p className="text-xs font-semibold text-[#1d1d1f]">Techcombank</p>
+                    <p className="text-[10px] text-[#86868b]">
+                      Số dư: {formatCurrency(tcbAccount?.balance || 0)}
+                    </p>
+                  </button>
+
+                  {/* MB Bank Option */}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPayerBank('mb')}
+                    className={`p-3 rounded-2xl text-left border transition-all active:scale-[0.98] relative overflow-hidden ${
+                      selectedPayerBank === 'mb'
+                        ? 'border-[#003399] bg-[#003399]/5 shadow-sm'
+                        : 'border-black/[0.06] bg-[#f5f5f7] hover:border-black/15'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <div className="w-6 h-6 rounded-full bg-[#003399] text-white flex items-center justify-center font-bold text-[9px]">
+                        MB
+                      </div>
+                      {selectedPayerBank === 'mb' && (
+                        <span className="material-symbols-rounded text-sm text-[#003399]">check_circle</span>
+                      )}
+                    </div>
+                    <p className="text-xs font-semibold text-[#1d1d1f]">MB Bank</p>
+                    <p className="text-[10px] text-[#86868b]">
+                      Số dư: {formatCurrency(mbAccount?.balance || 0)}
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Action Buttons to Launch Chosen Bank App */}
+              <div className="pt-1 space-y-2.5">
                 {/* Techcombank Action Button */}
                 <button
                   type="button"
                   onClick={() => handleExecuteTransfer('tcb')}
                   disabled={!accountNumber || parseSmartAmount(amountInput) <= 0}
-                  className="w-full py-3.5 px-4 bg-gradient-to-r from-[#e3001b] to-[#b30015] hover:opacity-95 active:scale-[0.98] text-white rounded-2xl font-medium text-xs shadow-sm flex items-center justify-between transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  className={`w-full py-3.5 px-4 bg-gradient-to-r from-[#e3001b] to-[#b30015] hover:opacity-95 active:scale-[0.98] text-white rounded-2xl font-medium text-xs shadow-sm flex items-center justify-between transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                    selectedPayerBank === 'tcb' ? 'ring-2 ring-[#e3001b]/50' : ''
+                  }`}
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-[#e3001b] font-black text-xs shadow-sm">
@@ -606,7 +737,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                     </div>
                     <div className="text-left">
                       <p className="font-semibold text-sm">Chuyển qua Techcombank</p>
-                      <p className="text-[10px] text-white/80">Mở app Techcombank Mobile & tự động điền</p>
+                      <p className="text-[10px] text-white/80">Trừ ví Techcombank ({formatCurrency(tcbAccount?.balance || 0)})</p>
                     </div>
                   </div>
                   <span className="material-symbols-rounded text-lg">arrow_forward</span>
@@ -617,7 +748,9 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                   type="button"
                   onClick={() => handleExecuteTransfer('mb')}
                   disabled={!accountNumber || parseSmartAmount(amountInput) <= 0}
-                  className="w-full py-3.5 px-4 bg-gradient-to-r from-[#003399] to-[#002266] hover:opacity-95 active:scale-[0.98] text-white rounded-2xl font-medium text-xs shadow-sm flex items-center justify-between transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                  className={`w-full py-3.5 px-4 bg-gradient-to-r from-[#003399] to-[#002266] hover:opacity-95 active:scale-[0.98] text-white rounded-2xl font-medium text-xs shadow-sm flex items-center justify-between transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
+                    selectedPayerBank === 'mb' ? 'ring-2 ring-[#003399]/50' : ''
+                  }`}
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-[#003399] font-black text-xs shadow-sm">
@@ -625,14 +758,14 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                     </div>
                     <div className="text-left">
                       <p className="font-semibold text-sm">Chuyển qua MB Bank</p>
-                      <p className="text-[10px] text-white/80">Mở app MB Bank & tự động điền</p>
+                      <p className="text-[10px] text-white/80">Trừ ví MB Bank ({formatCurrency(mbAccount?.balance || 0)})</p>
                     </div>
                   </div>
                   <span className="material-symbols-rounded text-lg">arrow_forward</span>
                 </button>
 
-                {/* Scan Again Link */}
-                <div className="text-center pt-2">
+                {/* Rescan Button */}
+                <div className="text-center pt-1">
                   <button
                     type="button"
                     onClick={() => {
@@ -645,6 +778,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                   </button>
                 </div>
               </div>
+
             </div>
           )}
 
@@ -660,7 +794,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                   Đang mở app {selectedPayerBank === 'tcb' ? 'Techcombank' : 'MB Bank'}
                 </h4>
                 <p className="text-xs text-[#86868b] mt-1 max-w-xs mx-auto">
-                  Số tiền {formatCurrency(parseSmartAmount(amountInput))} đã được gửi kèm thông tin tài khoản đến ngân hàng.
+                  Số tiền {formatCurrency(parseSmartAmount(amountInput))} với nội dung "{note}" đã được gửi sang app ngân hàng.
                 </p>
               </div>
 
@@ -699,9 +833,14 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
               )}
 
               {autoLogToLedger && (
-                <div className="bg-[#34c759]/10 text-[#34c759] text-xs font-semibold py-2 px-3 rounded-xl inline-flex items-center gap-1.5">
-                  <span className="material-symbols-rounded text-base">check_circle</span>
-                  Đã ghi nhận giao dịch vào ví {selectedPayerBank === 'tcb' ? 'Techcombank' : 'MB Bank'}
+                <div className="bg-[#34c759]/10 text-[#34c759] text-xs font-semibold py-2.5 px-3.5 rounded-2xl inline-flex flex-col items-center gap-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="material-symbols-rounded text-base">check_circle</span>
+                    <span>Đã ghi nhận vào ví {selectedPayerBank === 'tcb' ? 'Techcombank' : 'MB Bank'}</span>
+                  </div>
+                  <span className="text-[11px] font-normal text-[#34c759]/90">
+                    Phân bổ: {SPLIT_OPTIONS.find(o => o.id === splitType)?.label}
+                  </span>
                 </div>
               )}
 
