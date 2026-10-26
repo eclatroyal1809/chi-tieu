@@ -148,16 +148,16 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 pt-safe pb-safe backdrop-blur-md">
       <div className="w-full max-w-md bg-white rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border border-black/[0.08]">
         {/* Apple Style Header */}
-        <div className="bg-[#1d1d1f] px-6 py-4 text-white flex justify-between items-center shrink-0">
+        <div className="bg-white border-b border-black/[0.06] px-6 py-4 text-[#1d1d1f] flex justify-between items-center shrink-0">
           <div>
             <p className="text-[10px] text-[#86868b] uppercase tracking-wider font-semibold">Quyết toán chi phí</p>
-            <h2 className="font-semibold text-base text-white">
+            <h2 className="font-semibold text-base text-[#1d1d1f]">
               {isHistorical ? 'Hoá đơn thanh toán' : (step === 'preview' ? 'Đối soát cùng Mèo' : 'Xác nhận chuyển tiền')}
             </h2>
           </div>
           <button 
             onClick={onClose} 
-            className="w-8 h-8 flex items-center justify-center bg-white/10 hover:bg-white/20 active:scale-95 rounded-full transition-colors text-white"
+            className="w-8 h-8 flex items-center justify-center bg-[#f5f5f7] hover:bg-black/5 active:scale-95 rounded-full transition-colors text-[#86868b]"
           >
             <span className="material-symbols-rounded text-sm">close</span>
           </button>
