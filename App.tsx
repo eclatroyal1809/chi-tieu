@@ -503,31 +503,22 @@ export default function App() {
     }
   };
 
-  const handleLogQRTransfer = async (data: {
-    amount: number;
-    description: string;
-    account: AccountType;
-    splitType: SplitType;
-    date: Date;
-  }) => {
+  const handleLogQRTransfer = async (data: { amount: number; description: string; account: AccountType }) => {
     try {
       const newTx: Transaction = {
         id: 'qr-' + Date.now().toString(),
-        date: data.date.toISOString(),
+        date: new Date().toISOString(),
         description: data.description,
         amount: data.amount,
         accountId: data.account,
-        splitType: data.splitType,
+        splitType: SplitType.ME_ONLY,
         type: TransactionType.EXPENSE,
-        isSettled: false
+        isSettled: true
       };
       await supabaseService.addTransaction(newTx);
       const targetAcc = accounts.find(a => a.id === data.account);
       if (targetAcc) {
-        let newBal = targetAcc.balance;
-        if (data.splitType !== SplitType.MEO_PAID) {
-          newBal -= data.amount;
-        }
+        const newBal = targetAcc.balance - data.amount;
         await supabaseService.updateAccountBalance(data.account, newBal);
         setAccounts(prev => prev.map(a => a.id === data.account ? { ...a, balance: newBal } : a));
       }
@@ -1701,7 +1692,6 @@ export default function App() {
         <QRScannerModal
             isOpen={showQRScanner}
             onClose={() => setShowQRScanner(false)}
-            accounts={accounts}
             onLogTransaction={handleLogQRTransfer}
             getAmountSuggestions={getAmountSuggestions}
             formatCurrency={formatCurrency}

@@ -1,32 +1,23 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import jsQR from 'jsqr';
 import { parseVietQR, VIETNAM_BANKS, getVietQRDeepLink, getDirectAppScheme, getDynamicVietQRImage, ParsedVietQR } from '../utils/vietqr';
-import { Account, AccountType, SplitType } from '../types';
-import { SPLIT_OPTIONS } from '../constants';
+import { AccountType, TransactionType, SplitType } from '../types';
 
 interface QRScannerModalProps {
   isOpen: boolean;
   onClose: () => void;
-  accounts: Account[];
   onLogTransaction?: (data: {
     amount: number;
     description: string;
     account: AccountType;
-    splitType: SplitType;
-    date: Date;
   }) => void;
   getAmountSuggestions: (val: string) => number[];
   formatCurrency: (amount: number) => string;
 }
 
-const COMMON_NOTES = [
-  'Ăn uống', 'Đi chợ', 'Cà phê', 'Mua sắm', 'Tiền nhà', 'Chuyển tiền'
-];
-
 export const QRScannerModal: React.FC<QRScannerModalProps> = ({
   isOpen,
   onClose,
-  accounts,
   onLogTransaction,
   getAmountSuggestions,
   formatCurrency
@@ -41,12 +32,12 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
   const [hasTorch, setHasTorch] = useState(false);
 
   // Transfer Form States
+  const [parsedData, setParsedData] = useState<ParsedVietQR | null>(null);
   const [selectedBankCode, setSelectedBankCode] = useState<string>('tcb');
   const [accountNumber, setAccountNumber] = useState<string>('');
   const [beneficiaryName, setBeneficiaryName] = useState<string>('');
   const [amountInput, setAmountInput] = useState<string>('');
-  const [note, setNote] = useState<string>('Chuyển tiền');
-  const [splitType, setSplitType] = useState<SplitType>(SplitType.SHARED);
+  const [note, setNote] = useState<string>('Chuyen tien');
   const [selectedPayerBank, setSelectedPayerBank] = useState<'tcb' | 'mb'>('tcb');
   const [autoLogToLedger, setAutoLogToLedger] = useState<boolean>(true);
   const [qrImageUrl, setQrImageUrl] = useState<string>('');
@@ -58,10 +49,6 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const animFrameRef = useRef<number | null>(null);
-
-  // Balances of Techcombank & MB
-  const tcbAccount = accounts.find(a => a.id === AccountType.TCB);
-  const mbAccount = accounts.find(a => a.id === AccountType.MB);
 
   // Stop camera stream cleanly
   const stopCamera = useCallback(() => {
@@ -117,6 +104,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       streamRef.current = stream;
 
+      // Check flashlight support
       const videoTrack = stream.getVideoTracks()[0];
       if (videoTrack) {
         const capabilities = (videoTrack.getCapabilities?.() as { torch?: boolean }) || {};
@@ -153,6 +141,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
       });
 
       if (code && code.data) {
+        // Haptic feedback
         try {
           if (navigator.vibrate) navigator.vibrate(50);
         } catch {
@@ -169,7 +158,8 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
   // Handle scanned QR payload
   const handleScannedCode = (rawPayload: string) => {
     stopCamera();
-    const parsed: ParsedVietQR = parseVietQR(rawPayload);
+    const parsed = parseVietQR(rawPayload);
+    setParsedData(parsed);
     setSelectedBankCode(parsed.bankCode);
     setAccountNumber(parsed.accountNumber);
     setBeneficiaryName(parsed.beneficiaryName || '');
@@ -227,8 +217,28 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
     }
   };
 
+  // Download QR image helper
+  const downloadQR = async (imgUrl: string) => {
+    try {
+      const response = await fetch(imgUrl);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = `VietQR_${selectedBankCode.toUpperCase()}_${accountNumber}_${parseSmartAmount(amountInput)}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
+      return true;
+    } catch {
+      window.open(imgUrl, '_blank');
+      return false;
+    }
+  };
+
   // Execute Transfer to Bank App
-  const handleExecuteTransfer = (targetPayer: 'tcb' | 'mb') => {
+  const handleExecuteTransfer = async (targetPayer: 'tcb' | 'mb', autoDownloadQR: boolean = false) => {
     const amountNum = parseSmartAmount(amountInput);
     if (!accountNumber) {
       alert('Vui lòng nhập hoặc kiểm tra số tài khoản nhận tiền.');
@@ -241,16 +251,30 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
 
     setSelectedPayerBank(targetPayer);
 
-    const transferNote = note.trim() || 'Chuyen tien';
-
-    // Generate dynamic QR image for fallback
+    // Generate dynamic QR image with exact amount & description
     const dynamicQr = getDynamicVietQRImage({
       bankCodeOrBin: selectedBankCode,
       accountNumber,
       amount: amountNum,
-      note: transferNote
+      note
     });
     setQrImageUrl(dynamicQr);
+
+    // Auto copy account number to clipboard so banking app can detect it
+    try {
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(accountNumber);
+        setCopiedAccount(true);
+        setTimeout(() => setCopiedAccount(false), 3000);
+      }
+    } catch {
+      // ignore
+    }
+
+    // Auto download QR image to user gallery if requested or if Techcombank
+    if (autoDownloadQR) {
+      downloadQR(dynamicQr);
+    }
 
     // Official Web-to-App Deeplink URL
     const deeplink = getVietQRDeepLink({
@@ -258,35 +282,25 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
       bankCodeOrBin: selectedBankCode,
       accountNumber,
       amount: amountNum,
-      note: transferNote
+      note
     });
 
-    // Direct scheme as fallback / direct attempt
-    const directScheme = getDirectAppScheme(targetPayer);
-
-    // Attempt to open the app
+    // Attempt to open the app via VietQR universal deeplink
     try {
       window.location.href = deeplink;
-      setTimeout(() => {
-        try {
-          window.location.href = directScheme;
-        } catch {
-          // ignore
-        }
-      }, 500);
     } catch {
       window.open(deeplink, '_blank');
     }
 
-    // Auto log transaction to the matching bank wallet with selected splitType
+    // If auto log is checked, record transaction in ledger
     if (autoLogToLedger && onLogTransaction) {
       const accountType = targetPayer === 'tcb' ? AccountType.TCB : AccountType.MB;
+      const bankInfo = VIETNAM_BANKS.find(b => b.code === selectedBankCode);
+      const desc = `CK ${bankInfo?.shortName || selectedBankCode} - ${beneficiaryName || accountNumber}: ${note}`;
       onLogTransaction({
         amount: amountNum,
-        description: transferNote,
-        account: accountType,
-        splitType: splitType,
-        date: new Date()
+        description: desc,
+        account: accountType
       });
     }
 
@@ -298,12 +312,11 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
     if (isOpen) {
       setStep('scan');
       setCameraError(null);
+      setParsedData(null);
       setAccountNumber('');
       setBeneficiaryName('');
       setAmountInput('');
-      setNote('Chuyển tiền');
-      setSplitType(SplitType.SHARED);
-      setSelectedPayerBank('tcb');
+      setNote('Chuyen tien');
       startCamera();
     } else {
       stopCamera();
@@ -334,7 +347,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
           <div className="flex items-center gap-2">
             <span className="material-symbols-rounded text-xl text-[#0071e3]">qr_code_scanner</span>
             <h3 className="font-semibold text-base text-[#1d1d1f]">
-              {step === 'scan' ? 'Quét mã QR VietQR' : step === 'confirm' ? 'Chuyển tiền & Ghi chép' : 'Đang chuyển qua Ngân hàng...'}
+              {step === 'scan' ? 'Quét mã QR VietQR' : step === 'confirm' ? 'Chuyển tiền qua Ngân hàng' : 'Đang mở ứng dụng...'}
             </h3>
           </div>
           <button 
@@ -381,8 +394,12 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
 
                     {/* Scanner Overlay UI */}
                     <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+                      {/* Targeting Box */}
                       <div className="w-56 h-56 border-2 border-white/60 rounded-3xl relative shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]">
+                        {/* Animated Laser line */}
                         <div className="absolute left-2 right-2 h-0.5 bg-gradient-to-r from-transparent via-[#0071e3] to-transparent animate-pulse top-1/2 -translate-y-1/2"></div>
+                        
+                        {/* Corner markers */}
                         <div className="absolute top-2 left-2 w-4 h-4 border-t-2 border-l-2 border-[#0071e3] rounded-tl-lg"></div>
                         <div className="absolute top-2 right-2 w-4 h-4 border-t-2 border-r-2 border-[#0071e3] rounded-tr-lg"></div>
                         <div className="absolute bottom-2 left-2 w-4 h-4 border-b-2 border-l-2 border-[#0071e3] rounded-bl-lg"></div>
@@ -448,14 +465,13 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
             </div>
           )}
 
-          {/* STEP 2: FILL DETAILS, ALLOCATION & BANK SELECTION */}
+          {/* STEP 2: FILL AMOUNT & SELECT TECHCOMBANK OR MB BANK */}
           {step === 'confirm' && (
             <div className="space-y-4">
-              
               {/* Recipient Details Card */}
-              <div className="bg-[#f5f5f7] p-3.5 rounded-2xl border border-black/[0.04] space-y-2.5">
+              <div className="bg-[#f5f5f7] p-4 rounded-2xl border border-black/[0.04] space-y-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-[10px] font-semibold text-[#86868b] uppercase tracking-wider">Người thụ hưởng</span>
+                  <span className="text-[10px] font-semibold text-[#86868b] uppercase tracking-wider">Tài khoản nhận</span>
                   <span className="text-[10px] font-semibold text-[#0071e3] bg-[#0071e3]/10 px-2 py-0.5 rounded-full">
                     VietQR 24/7
                   </span>
@@ -463,6 +479,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
 
                 {/* Bank Selector */}
                 <div>
+                  <label className="text-[10px] text-[#86868b] font-medium block mb-1">Ngân hàng thụ hưởng</label>
                   <select
                     value={selectedBankCode}
                     onChange={(e) => setSelectedBankCode(e.target.value)}
@@ -476,14 +493,15 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                   </select>
                 </div>
 
-                {/* Account Number & Copy */}
+                {/* Account Number */}
                 <div className="flex items-center gap-2">
                   <div className="flex-1">
+                    <label className="text-[10px] text-[#86868b] font-medium block mb-0.5">Số tài khoản</label>
                     <input
                       type="text"
                       value={accountNumber}
                       onChange={(e) => setAccountNumber(e.target.value.replace(/\s+/g, ''))}
-                      placeholder="Số tài khoản thụ hưởng"
+                      placeholder="Nhập số tài khoản thụ hưởng"
                       className="w-full bg-white border border-black/[0.06] rounded-xl px-3 py-2 text-xs font-semibold text-[#1d1d1f] outline-none font-mono tracking-wider"
                     />
                   </div>
@@ -495,7 +513,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                         setCopiedAccount(true);
                         setTimeout(() => setCopiedAccount(false), 2000);
                       }}
-                      className="px-3 py-2 bg-white border border-black/[0.06] rounded-xl text-xs font-medium text-[#1d1d1f] hover:bg-black/5 active:scale-95 transition-all flex items-center gap-1"
+                      className="mt-4 px-3 py-2 bg-white border border-black/[0.06] rounded-xl text-xs font-medium text-[#1d1d1f] hover:bg-black/5 active:scale-95 transition-all flex items-center gap-1"
                     >
                       <span className="material-symbols-rounded text-sm">
                         {copiedAccount ? 'check' : 'content_copy'}
@@ -507,9 +525,12 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
 
                 {/* Beneficiary Name if present */}
                 {beneficiaryName && (
-                  <p className="text-xs font-semibold uppercase text-[#1d1d1f] bg-white px-3 py-1.5 rounded-xl border border-black/[0.06]">
-                    {beneficiaryName}
-                  </p>
+                  <div>
+                    <label className="text-[10px] text-[#86868b] font-medium block mb-0.5">Người thụ hưởng</label>
+                    <p className="text-xs font-semibold uppercase text-[#1d1d1f] bg-white px-3 py-2 rounded-xl border border-black/[0.06]">
+                      {beneficiaryName}
+                    </p>
+                  </div>
                 )}
               </div>
 
@@ -519,7 +540,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                   Số tiền chuyển khoản
                 </label>
                 
-                <div className="text-center mb-1.5">
+                <div className="text-center mb-2">
                   <div className="inline-flex items-baseline justify-center">
                     <input
                       type="text"
@@ -562,210 +583,89 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                 </div>
               </div>
 
-              {/* Transfer Note & Description (Nội dung chuyển khoản) */}
-              <div className="bg-white p-3.5 rounded-2xl border border-black/[0.06] shadow-sm space-y-2">
-                <div className="flex justify-between items-center">
-                  <label className="text-[10px] font-semibold text-[#86868b] uppercase tracking-wider block">
-                    Nội dung chuyển khoản & Ghi chép
-                  </label>
-                  <span className="text-[10px] text-[#86868b]">{note.length}/50</span>
-                </div>
-                
-                <div className="bg-[#f5f5f7] rounded-xl px-3.5 py-2.5 flex items-center gap-2 border border-black/[0.03]">
-                  <span className="material-symbols-rounded text-[#86868b] text-base">edit_note</span>
-                  <input
-                    type="text"
-                    value={note}
-                    maxLength={50}
-                    onChange={(e) => setNote(e.target.value)}
-                    placeholder="Nhập nội dung chuyển tiền (ví dụ: Ăn trưa, Cà phê...)"
-                    className="w-full text-xs font-semibold text-[#1d1d1f] placeholder-[#86868b]/60 outline-none bg-transparent"
-                  />
-                </div>
-
-                {/* Common Note Chips */}
-                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pt-0.5">
-                  {COMMON_NOTES.map((preset) => (
-                    <button
-                      key={preset}
-                      type="button"
-                      onClick={() => setNote(preset)}
-                      className={`px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all shrink-0 ${
-                        note === preset
-                          ? 'bg-[#1d1d1f] text-white'
-                          : 'bg-[#f5f5f7] text-[#86868b] hover:text-[#1d1d1f]'
-                      }`}
-                    >
-                      {preset}
-                    </button>
-                  ))}
-                </div>
+              {/* Transfer Note / Message */}
+              <div>
+                <label className="text-[10px] font-semibold text-[#86868b] uppercase tracking-wider block mb-1 px-1">
+                  Nội dung chuyển tiền
+                </label>
+                <input
+                  type="text"
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Lời nhắn chuyển tiền"
+                  className="w-full bg-[#f5f5f7] border border-black/[0.06] rounded-2xl px-4 py-3 text-xs font-medium text-[#1d1d1f] outline-none"
+                />
               </div>
 
-              {/* Expense Allocation (Phân bổ chi phí chuẩn luồng setup) */}
-              <div className="bg-white p-3.5 rounded-2xl border border-black/[0.06] shadow-sm space-y-2.5">
-                <div className="flex justify-between items-center">
-                  <label className="text-[10px] font-semibold text-[#86868b] uppercase tracking-wider block">
-                    Phân bổ chi phí
-                  </label>
-                  <span className="text-[10px] font-medium text-[#0071e3]">
-                    {SPLIT_OPTIONS.find(o => o.id === splitType)?.desc}
-                  </span>
-                </div>
+              {/* Auto Log Checkbox */}
+              <label className="flex items-center gap-2.5 px-1 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={autoLogToLedger}
+                  onChange={(e) => setAutoLogToLedger(e.target.checked)}
+                  className="w-4 h-4 rounded text-[#0071e3] accent-[#1d1d1f] focus:ring-0 cursor-pointer"
+                />
+                <span className="text-xs text-[#1d1d1f] font-medium">
+                  Tự động ghi nhận vào sổ chi tiêu của ví tương ứng
+                </span>
+              </label>
 
-                <div className="grid grid-cols-2 gap-2">
-                  {SPLIT_OPTIONS.map((opt) => {
-                    const isSelected = splitType === opt.id;
-                    return (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        onClick={() => setSplitType(opt.id as SplitType)}
-                        className={`p-2.5 rounded-xl text-left border flex items-center gap-2 transition-all active:scale-[0.98] ${
-                          isSelected
-                            ? 'bg-[#0071e3]/10 border-[#0071e3] text-[#0071e3] font-semibold'
-                            : 'bg-[#f5f5f7] border-transparent text-[#1d1d1f] hover:border-black/10'
-                        }`}
-                      >
-                        <span className="material-symbols-rounded text-sm shrink-0">{opt.icon}</span>
-                        <div className="truncate">
-                          <p className="text-xs truncate">{opt.label}</p>
-                          <p className="text-[9px] text-[#86868b] truncate">{opt.desc}</p>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
+              {/* Primary Bank Buttons: Techcombank & MB Bank */}
+              <div className="pt-2 space-y-3">
+                <p className="text-[11px] font-semibold text-[#86868b] uppercase tracking-wider text-center">
+                  Chọn ứng dụng ngân hàng để chuyển
+                </p>
 
-                {/* Subtext explanation of debt impact */}
-                <div className="bg-[#f5f5f7] px-3 py-2 rounded-xl text-[11px] text-[#86868b] flex items-center gap-1.5">
-                  <span className="material-symbols-rounded text-sm text-[#0071e3]">info</span>
-                  <span>
-                    {splitType === SplitType.SHARED && 'Mèo sẽ chịu 50% số tiền này và tính vào công nợ chốt sổ.'}
-                    {splitType === SplitType.ME_ONLY && 'Khoản chi của riêng bạn, không ảnh hưởng đến nợ của Mèo.'}
-                    {splitType === SplitType.MEO_ONLY && 'Mèo sẽ nợ bạn 100% số tiền này khi chốt sổ.'}
-                    {splitType === SplitType.MEO_PAID && 'Khoản Mèo thanh toán, sẽ được trừ vào số nợ của Mèo.'}
-                  </span>
-                </div>
-              </div>
-
-              {/* Source Wallet & Paying Bank Section (Ví thanh toán tương ứng) */}
-              <div className="bg-white p-3.5 rounded-2xl border border-black/[0.06] shadow-sm space-y-2.5">
-                <div className="flex justify-between items-center">
-                  <label className="text-[10px] font-semibold text-[#86868b] uppercase tracking-wider block">
-                    Ví thanh toán & Ngân hàng chuyển
-                  </label>
-                  <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                    <input
-                      type="checkbox"
-                      checked={autoLogToLedger}
-                      onChange={(e) => setAutoLogToLedger(e.target.checked)}
-                      className="w-3.5 h-3.5 rounded text-[#0071e3] accent-[#1d1d1f] focus:ring-0 cursor-pointer"
-                    />
-                    <span className="text-[11px] text-[#86868b] font-medium">
-                      Ghi sổ chi tiêu
-                    </span>
-                  </label>
-                </div>
-
-                {/* 2 Interactive Bank Wallet Cards */}
-                <div className="grid grid-cols-2 gap-2.5">
-                  {/* Techcombank Option */}
+                {/* Techcombank Action Group */}
+                <div className="space-y-1.5">
                   <button
                     type="button"
-                    onClick={() => setSelectedPayerBank('tcb')}
-                    className={`p-3 rounded-2xl text-left border transition-all active:scale-[0.98] relative overflow-hidden ${
-                      selectedPayerBank === 'tcb'
-                        ? 'border-[#e3001b] bg-[#e3001b]/5 shadow-sm'
-                        : 'border-black/[0.06] bg-[#f5f5f7] hover:border-black/15'
-                    }`}
+                    onClick={() => handleExecuteTransfer('tcb', true)}
+                    disabled={!accountNumber || parseSmartAmount(amountInput) <= 0}
+                    className="w-full py-3.5 px-4 bg-gradient-to-r from-[#e3001b] to-[#b30015] hover:opacity-95 active:scale-[0.98] text-white rounded-2xl font-medium text-xs shadow-sm flex items-center justify-between transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="w-6 h-6 rounded-full bg-[#e3001b] text-white flex items-center justify-center font-bold text-[9px]">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-[#e3001b] font-black text-xs shadow-sm">
                         TCB
                       </div>
-                      {selectedPayerBank === 'tcb' && (
-                        <span className="material-symbols-rounded text-sm text-[#e3001b]">check_circle</span>
-                      )}
+                      <div className="text-left">
+                        <p className="font-semibold text-sm">Chuyển qua Techcombank</p>
+                        <p className="text-[10px] text-white/80">Tải mã QR tự điền số tiền + Mở app</p>
+                      </div>
                     </div>
-                    <p className="text-xs font-semibold text-[#1d1d1f]">Techcombank</p>
-                    <p className="text-[10px] text-[#86868b]">
-                      Số dư: {formatCurrency(tcbAccount?.balance || 0)}
-                    </p>
+                    <span className="material-symbols-rounded text-lg">arrow_forward</span>
                   </button>
+                  <p className="text-[10px] text-[#86868b] text-center px-2">
+                    💡 Techcombank bảo mật: Tải mã QR để vào app quét ảnh tự động điền 100% số tiền
+                  </p>
+                </div>
 
-                  {/* MB Bank Option */}
+                {/* MB Bank Action Group */}
+                <div className="space-y-1.5">
                   <button
                     type="button"
-                    onClick={() => setSelectedPayerBank('mb')}
-                    className={`p-3 rounded-2xl text-left border transition-all active:scale-[0.98] relative overflow-hidden ${
-                      selectedPayerBank === 'mb'
-                        ? 'border-[#003399] bg-[#003399]/5 shadow-sm'
-                        : 'border-black/[0.06] bg-[#f5f5f7] hover:border-black/15'
-                    }`}
+                    onClick={() => handleExecuteTransfer('mb', false)}
+                    disabled={!accountNumber || parseSmartAmount(amountInput) <= 0}
+                    className="w-full py-3.5 px-4 bg-gradient-to-r from-[#003399] to-[#002266] hover:opacity-95 active:scale-[0.98] text-white rounded-2xl font-medium text-xs shadow-sm flex items-center justify-between transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                   >
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="w-6 h-6 rounded-full bg-[#003399] text-white flex items-center justify-center font-bold text-[9px]">
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-[#003399] font-black text-xs shadow-sm">
                         MB
                       </div>
-                      {selectedPayerBank === 'mb' && (
-                        <span className="material-symbols-rounded text-sm text-[#003399]">check_circle</span>
-                      )}
+                      <div className="text-left">
+                        <p className="font-semibold text-sm">Chuyển qua MB Bank</p>
+                        <p className="text-[10px] text-white/80">Mở thẳng màn hình chuyển tiền MB</p>
+                      </div>
                     </div>
-                    <p className="text-xs font-semibold text-[#1d1d1f]">MB Bank</p>
-                    <p className="text-[10px] text-[#86868b]">
-                      Số dư: {formatCurrency(mbAccount?.balance || 0)}
-                    </p>
+                    <span className="material-symbols-rounded text-lg">arrow_forward</span>
                   </button>
+                  <p className="text-[10px] text-[#86868b] text-center px-2">
+                    💡 MB Bank hỗ trợ mở trực tiếp màn hình chuyển khoản qua VietQR
+                  </p>
                 </div>
-              </div>
 
-              {/* Action Buttons to Launch Chosen Bank App */}
-              <div className="pt-1 space-y-2.5">
-                {/* Techcombank Action Button */}
-                <button
-                  type="button"
-                  onClick={() => handleExecuteTransfer('tcb')}
-                  disabled={!accountNumber || parseSmartAmount(amountInput) <= 0}
-                  className={`w-full py-3.5 px-4 bg-gradient-to-r from-[#e3001b] to-[#b30015] hover:opacity-95 active:scale-[0.98] text-white rounded-2xl font-medium text-xs shadow-sm flex items-center justify-between transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
-                    selectedPayerBank === 'tcb' ? 'ring-2 ring-[#e3001b]/50' : ''
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-[#e3001b] font-black text-xs shadow-sm">
-                      TCB
-                    </div>
-                    <div className="text-left">
-                      <p className="font-semibold text-sm">Chuyển qua Techcombank</p>
-                      <p className="text-[10px] text-white/80">Trừ ví Techcombank ({formatCurrency(tcbAccount?.balance || 0)})</p>
-                    </div>
-                  </div>
-                  <span className="material-symbols-rounded text-lg">arrow_forward</span>
-                </button>
-
-                {/* MB Bank Action Button */}
-                <button
-                  type="button"
-                  onClick={() => handleExecuteTransfer('mb')}
-                  disabled={!accountNumber || parseSmartAmount(amountInput) <= 0}
-                  className={`w-full py-3.5 px-4 bg-gradient-to-r from-[#003399] to-[#002266] hover:opacity-95 active:scale-[0.98] text-white rounded-2xl font-medium text-xs shadow-sm flex items-center justify-between transition-all disabled:opacity-40 disabled:cursor-not-allowed ${
-                    selectedPayerBank === 'mb' ? 'ring-2 ring-[#003399]/50' : ''
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-white flex items-center justify-center text-[#003399] font-black text-xs shadow-sm">
-                      MB
-                    </div>
-                    <div className="text-left">
-                      <p className="font-semibold text-sm">Chuyển qua MB Bank</p>
-                      <p className="text-[10px] text-white/80">Trừ ví MB Bank ({formatCurrency(mbAccount?.balance || 0)})</p>
-                    </div>
-                  </div>
-                  <span className="material-symbols-rounded text-lg">arrow_forward</span>
-                </button>
-
-                {/* Rescan Button */}
-                <div className="text-center pt-1">
+                {/* Scan Again Link */}
+                <div className="text-center pt-2">
                   <button
                     type="button"
                     onClick={() => {
@@ -778,15 +678,14 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                   </button>
                 </div>
               </div>
-
             </div>
           )}
 
-          {/* STEP 3: SUCCESS / APP SWITCH HELPER */}
+          {/* STEP 3: SUCCESS / APP SWITCH HELPER & AUTOFILL GUIDE */}
           {step === 'success' && (
             <div className="py-2 text-center space-y-4">
-              <div className="w-14 h-14 rounded-full bg-[#34c759]/10 text-[#34c759] flex items-center justify-center mx-auto">
-                <span className="material-symbols-rounded text-3xl">open_in_new</span>
+              <div className="w-12 h-12 rounded-full bg-[#34c759]/10 text-[#34c759] flex items-center justify-center mx-auto">
+                <span className="material-symbols-rounded text-2xl">check_circle</span>
               </div>
 
               <div>
@@ -794,63 +693,93 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                   Đang mở app {selectedPayerBank === 'tcb' ? 'Techcombank' : 'MB Bank'}
                 </h4>
                 <p className="text-xs text-[#86868b] mt-1 max-w-xs mx-auto">
-                  Số tiền {formatCurrency(parseSmartAmount(amountInput))} với nội dung "{note}" đã được gửi sang app ngân hàng.
+                  Số tiền: <strong className="text-[#1d1d1f]">{formatCurrency(parseSmartAmount(amountInput))}</strong>
+                  <br />
+                  Đến STK: <strong className="text-[#1d1d1f] font-mono">{accountNumber}</strong>
                 </p>
               </div>
 
-              {/* Dynamic QR Fallback Card */}
+              {/* Instructions Guide for Techcombank & MB Autofill */}
+              <div className="bg-[#f5f5f7] p-4 rounded-3xl border border-black/[0.05] text-left space-y-2.5">
+                <div className="flex items-center gap-2 text-[#1d1d1f] font-semibold text-xs">
+                  <span className="material-symbols-rounded text-base text-[#0071e3]">auto_fix_high</span>
+                  <span>Hướng dẫn tự động điền 100% số tiền:</span>
+                </div>
+                
+                <div className="space-y-2 text-[11px] text-[#48484a] leading-relaxed">
+                  <div className="flex items-start gap-2">
+                    <span className="w-4 h-4 rounded-full bg-[#1d1d1f] text-white flex items-center justify-center text-[9px] font-bold shrink-0 mt-0.5">1</span>
+                    <span>Bấm nút <strong>"Tải ảnh mã QR"</strong> bên dưới vào thư viện ảnh của máy.</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="w-4 h-4 rounded-full bg-[#1d1d1f] text-white flex items-center justify-center text-[9px] font-bold shrink-0 mt-0.5">2</span>
+                    <span>Mở app {selectedPayerBank === 'tcb' ? 'Techcombank' : 'MB Bank'}, bấm biểu tượng <strong>Quét mã QR</strong> ở góc trên.</span>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <span className="w-4 h-4 rounded-full bg-[#1d1d1f] text-white flex items-center justify-center text-[9px] font-bold shrink-0 mt-0.5">3</span>
+                    <span>Chọn <strong>"Chọn ảnh từ thư viện"</strong> (chọn ảnh QR vừa tải). App sẽ <strong>tự động điền đúng 100% số tiền {formatCurrency(parseSmartAmount(amountInput))}</strong> mà không cần gõ lại!</span>
+                  </div>
+                </div>
+
+                {/* Quick Action Buttons inside Guide */}
+                <div className="pt-2 grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => qrImageUrl && downloadQR(qrImageUrl)}
+                    className="py-2.5 px-3 bg-white text-[#1d1d1f] border border-black/[0.08] hover:bg-black/5 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                  >
+                    <span className="material-symbols-rounded text-base text-[#0071e3]">download</span>
+                    Tải ảnh mã QR
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard?.writeText(accountNumber);
+                      setCopiedAccount(true);
+                      setTimeout(() => setCopiedAccount(false), 2000);
+                    }}
+                    className="py-2.5 px-3 bg-white text-[#1d1d1f] border border-black/[0.08] hover:bg-black/5 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                  >
+                    <span className="material-symbols-rounded text-base">content_copy</span>
+                    {copiedAccount ? 'Đã sao chép' : 'Chép STK'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Dynamic QR Fallback Preview */}
               {qrImageUrl && (
-                <div className="bg-[#f5f5f7] p-4 rounded-3xl border border-black/[0.05] inline-block max-w-[280px] mx-auto space-y-2">
-                  <p className="text-[10px] font-semibold text-[#86868b] uppercase tracking-wider">
-                    Mã VietQR động đã điền số tiền
-                  </p>
+                <div className="space-y-1.5">
                   <img
                     src={qrImageUrl}
                     alt="VietQR Dynamic"
-                    className="w-56 h-56 mx-auto rounded-2xl bg-white p-2 shadow-sm border border-black/[0.06]"
+                    className="w-48 h-48 mx-auto rounded-2xl bg-white p-2 shadow-sm border border-black/[0.06]"
                   />
-                  <div className="pt-1 flex gap-2">
-                    <a
-                      href={qrImageUrl}
-                      download={`VietQR_${accountNumber}_${parseSmartAmount(amountInput)}.png`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex-1 py-2 bg-white text-[#1d1d1f] border border-black/[0.08] hover:bg-black/5 font-medium rounded-xl text-[11px] flex items-center justify-center gap-1 shadow-sm"
-                    >
-                      <span className="material-symbols-rounded text-sm">download</span>
-                      Lưu ảnh QR
-                    </a>
-                    <button
-                      type="button"
-                      onClick={() => handleExecuteTransfer(selectedPayerBank)}
-                      className="flex-1 py-2 bg-[#1d1d1f] text-white hover:bg-black font-medium rounded-xl text-[11px] flex items-center justify-center gap-1 shadow-sm"
-                    >
-                      <span className="material-symbols-rounded text-sm">replay</span>
-                      Mở lại App
-                    </button>
-                  </div>
+                  <p className="text-[10px] text-[#86868b]">Mã VietQR động chứa số tiền {formatCurrency(parseSmartAmount(amountInput))}</p>
                 </div>
               )}
 
-              {autoLogToLedger && (
-                <div className="bg-[#34c759]/10 text-[#34c759] text-xs font-semibold py-2.5 px-3.5 rounded-2xl inline-flex flex-col items-center gap-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="material-symbols-rounded text-base">check_circle</span>
-                    <span>Đã ghi nhận vào ví {selectedPayerBank === 'tcb' ? 'Techcombank' : 'MB Bank'}</span>
-                  </div>
-                  <span className="text-[11px] font-normal text-[#34c759]/90">
-                    Phân bổ: {SPLIT_OPTIONS.find(o => o.id === splitType)?.label}
-                  </span>
-                </div>
-              )}
+              {/* Action Buttons: Open App Again & Finish */}
+              <div className="space-y-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => handleExecuteTransfer(selectedPayerBank, false)}
+                  className={`w-full py-3.5 text-white font-medium rounded-2xl text-xs shadow-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-all ${
+                    selectedPayerBank === 'tcb' 
+                      ? 'bg-gradient-to-r from-[#e3001b] to-[#b30015]' 
+                      : 'bg-gradient-to-r from-[#003399] to-[#002266]'
+                  }`}
+                >
+                  <span className="material-symbols-rounded text-base">open_in_new</span>
+                  Mở lại app {selectedPayerBank === 'tcb' ? 'Techcombank' : 'MB Bank'}
+                </button>
 
-              <div className="pt-2">
                 <button
                   type="button"
                   onClick={onClose}
-                  className="w-full py-3 bg-[#f5f5f7] hover:bg-[#e8e8ed] text-[#1d1d1f] font-medium rounded-full text-xs transition-all"
+                  className="w-full py-3 bg-[#f5f5f7] hover:bg-[#e8e8ed] text-[#1d1d1f] font-medium rounded-2xl text-xs transition-all"
                 >
-                  Hoàn tất & Quay lại
+                  Đã chuyển xong & Quay lại
                 </button>
               </div>
             </div>
