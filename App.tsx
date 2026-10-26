@@ -1,16 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { AccountType, Account, Transaction, SplitType, TransactionType } from './types';
-import { INITIAL_ACCOUNTS, SPLIT_OPTIONS } from './constants';
+import { INITIAL_ACCOUNTS, SPLIT_OPTIONS, MEO_NAME } from './constants';
 import { AccountCard } from './components/AccountCard';
 import { BillGenerator } from './components/BillGenerator';
 import { MonthlyStats } from './components/MonthlyStats';
+import { QRScannerModal } from './components/QRScannerModal';
 import * as supabaseService from './services/supabaseService';
-import { supabase } from './supabaseClient'; // Import to check config
+import { supabase } from './supabaseClient';
 import { motion, AnimatePresence } from 'motion/react';
 import DatePicker from 'react-datepicker';
 import { vi } from 'date-fns/locale';
-// @ts-ignore
-import html2canvas from 'html2canvas';
 
 const formatShortWeekday = (nameOfDay: string) => {
     const name = nameOfDay.toLowerCase();
@@ -24,8 +23,6 @@ const formatShortWeekday = (nameOfDay: string) => {
     return name.substring(0, 2).toUpperCase();
 };
 
-const GOLD_BRANDS = ['SJC', 'PNJ', 'DOJI', 'Bảo Tín Minh Châu', 'Khác'];
-
 export default function App() {
   // State
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -33,11 +30,13 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [configError, setConfigError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'home' | 'history' | 'piggy' | 'shop' | 'gold'>('home');
+  // Active Tab - 3 tabs: Home, History, Shop
+  const [activeTab, setActiveTab] = useState<'home' | 'history' | 'shop'>('home');
   const [historyFilter, setHistoryFilter] = useState<'MEO' | 'ME' | 'BILL'>('MEO');
   
   const [showBill, setShowBill] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
+  const [showQRScanner, setShowQRScanner] = useState(false);
   
   // Delete Confirmation State
   const [deletingTx, setDeletingTx] = useState<Transaction | null>(null);
@@ -67,94 +66,29 @@ export default function App() {
   const [transferAmount, setTransferAmount] = useState('');
   const [transferFrom, setTransferFrom] = useState<AccountType>(AccountType.MB);
   const [transferTo, setTransferTo] = useState<AccountType>(AccountType.CASH);
-  
-  // Edit TET_SAVING State
-  const [isEditingTetSaving, setIsEditingTetSaving] = useState(false);
-  const [tempTetSavingBalance, setTempTetSavingBalance] = useState('');
 
-  type PiggyDay = {
-      date: string;
-      amount: number;
-      done: boolean;
-      txId?: string;
-      reversedTxId?: string;
-      doneAt?: string;
-      undoneAt?: string;
-  };
-
-  type PiggyPlan = {
-      id: string;
-      goalAmount: number;
-      targetDate: string;
-      startDate: string;
-      createdAt: string;
-      days: PiggyDay[];
-  };
-
-  type GoldState = {
-      id: string;
-      totalPhan: number;
-      brandTotals?: Record<string, number>; // brand -> totalPhan
-      brandMoneySpent?: Record<string, number>; // brand -> total VND spent
-      brands?: string[]; // remembered brands
-      updatedAt?: string;
-  };
-
-  const [piggyGoal, setPiggyGoal] = useState('');
-  const [piggyTargetDate, setPiggyTargetDate] = useState<Date>(new Date());
-  const [piggyPlan, setPiggyPlan] = useState<PiggyPlan | null>(null);
-
-  const [goldState, setGoldState] = useState<GoldState | null>(null);
-  const [goldBuyAmount, setGoldBuyAmount] = useState('');
-  const [goldBuyLuong, setGoldBuyLuong] = useState('');
-  const [goldBuyChi, setGoldBuyChi] = useState('');
-  const [goldBuyPhan, setGoldBuyPhan] = useState('');
-  const [goldBuyBrand, setGoldBuyBrand] = useState('SJC');
-  const [goldBuyDate, setGoldBuyDate] = useState<Date>(new Date());
-
-  const [goldWithdrawAmount, setGoldWithdrawAmount] = useState('');
-  const [goldWithdrawLuong, setGoldWithdrawLuong] = useState('');
-  const [goldWithdrawChi, setGoldWithdrawChi] = useState('');
-  const [goldWithdrawPhan, setGoldWithdrawPhan] = useState('');
-  const [goldWithdrawBrand, setGoldWithdrawBrand] = useState('SJC');
-  const [showGoldWithdraw, setShowGoldWithdraw] = useState(false);
-  
   // Shop State
-  const [activeShop, setActiveShop] = useState<string>('elank');
-  const [shopView, setShopView] = useState<'overview' | 'inventory' | 'finance' | 'orders'>('finance');
+  const [activeShop] = useState<string>('elank');
+  const [shopView, setShopView] = useState<'finance' | 'orders' | 'inventory'>('finance');
 
   const [products, setProducts] = useState<any[]>([]);
   const [combos, setCombos] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [shopFinances, setShopFinances] = useState<any[]>([]);
-  const [invSearch, setInvSearch] = useState('');
-  const [expandedInvGroups, setExpandedInvGroups] = useState<string[]>([]);
   const [editingProduct, setEditingProduct] = useState<any | null>(null);
   const [editProdForm, setEditProdForm] = useState({ name: '', originalPrice: '', sellingPrice: '' });
 
   const [invForm, setInvForm] = useState({ name: '', originalPrice: '', sellingPrice: '', stock: '1', date: new Date(), accountId: AccountType.MB });
   const [ordForm, setOrdForm] = useState({ channel: 'Shopee', name: '', phone: '', address: '', productId: '', qty: '1', deposit: '', depositAccountId: AccountType.MB, shipping: '', voucher: '', paymentFee: '', status: 'Chưa Gửi Hàng', paymentMethod: 'Đang Thanh Toán' });
-  const [orderToDelete, setOrderToDelete] = useState<string|null>(null);
-  const [productToDelete, setProductToDelete] = useState<string|null>(null);
-  const [comboToDelete, setComboToDelete] = useState<string|null>(null);
   const [financeToDelete, setFinanceToDelete] = useState<string|null>(null);
-  const [ordItems, setOrdItems] = useState<{productId: string, qty: string, price?: string}[]>([
+  const [ordItems, setOrdItems] = useState<{productId: string, qty: string, price?: string, comboId?: string, isCombo?: boolean}[]>([
     { productId: '', qty: '1', price: '' },
     { productId: '', qty: '1', price: '' }
   ]);
   const [finForm, setFinForm] = useState({ type: 'INCOME', amount: '', desc: '', category: 'Khác', date: new Date(), accountId: AccountType.MB });
-  const [expandedOrders, setExpandedOrders] = useState<string[]>([]);
-  const [stockMoves, setStockMoves] = useState<any[]>([]);
-  const [showStockMoves, setShowStockMoves] = useState(false);
   
   const [orderTab, setOrderTab] = useState<'list' | 'create'>('list');
-  const [invTab, setInvTab] = useState<'products' | 'combos'>('products');
 
-  const [comboForm, setComboForm] = useState({ name: '', price: '', description: '', packQty: '1', items: [{ productId: '', qty: '1' }] });
-  const [showComboCreator, setShowComboCreator] = useState(false);
-
-  // Constant Base Fee (Initial Deposit/Credit)
-  // UPDATE: Set to 0 as requested. Mèo has no initial deposit.
   const BASE_FEE = 0;
 
   // Initial Data Fetching
@@ -162,8 +96,6 @@ export default function App() {
     const loadData = async () => {
         setIsLoading(true);
         
-        // Check if Supabase is configured with default/placeholder values
-        // @ts-ignore - Accessing internal property if needed, or just checking known placeholders
         if ((supabase as any).supabaseUrl && (supabase as any).supabaseUrl.includes('your-project')) {
              setConfigError("Vui lòng cấu hình Supabase URL và Key trong file supabaseClient.ts hoặc biến môi trường.");
              setIsLoading(false);
@@ -171,75 +103,27 @@ export default function App() {
         }
 
         try {
-            // Seed initial accounts if first run
             await supabaseService.seedAccountsIfEmpty(INITIAL_ACCOUNTS);
-            await supabaseService.ensureTetSavingExists(INITIAL_ACCOUNTS);
             
-            // Fetch data concurrently
-            const [fetchedAccounts, fetchedTransactions, fetchedShopProducts, fetchedShopCombos, fetchedShopOrders, fetchedShopFinances, fetchedPiggyPlan, fetchedGoldState] = await Promise.all([
+            const [fetchedAccounts, fetchedTransactions, fetchedShopProducts, fetchedShopCombos, fetchedShopOrders, fetchedShopFinances] = await Promise.all([
                 supabaseService.getAccounts(),
                 supabaseService.getTransactions(),
                 supabaseService.getShopProducts(),
                 supabaseService.getShopCombos(activeShop).catch(() => []),
                 supabaseService.getShopOrders(),
-                supabaseService.getShopFinances(),
-                supabaseService.getPiggyPlan().catch(() => null),
-                supabaseService.getGoldState().catch(() => null)
+                supabaseService.getShopFinances()
             ]);
 
-            setAccounts(fetchedAccounts);
+            // Filter out TET_SAVING completely as requested
+            const cleanAccounts = fetchedAccounts.filter(a => a.id !== AccountType.TET_SAVING);
+            setAccounts(cleanAccounts);
             setTransactions(fetchedTransactions);
             setProducts(fetchedShopProducts);
             setCombos(fetchedShopCombos);
             setOrders(fetchedShopOrders);
             setShopFinances(fetchedShopFinances);
-            if (fetchedPiggyPlan && fetchedPiggyPlan.days && Array.isArray(fetchedPiggyPlan.days)) {
-                setPiggyPlan(fetchedPiggyPlan);
-                if (typeof fetchedPiggyPlan.goalAmount === 'number') setPiggyGoal(formatNumberInput(String(fetchedPiggyPlan.goalAmount)));
-                if (typeof fetchedPiggyPlan.targetDate === 'string') setPiggyTargetDate(new Date(fetchedPiggyPlan.targetDate));
-            } else {
-                try {
-                    const raw = localStorage.getItem('piggyPlan_v1');
-                    if (raw) {
-                        const parsed = JSON.parse(raw);
-                        if (parsed && parsed.days && Array.isArray(parsed.days)) {
-                            setPiggyPlan(parsed);
-                            if (typeof parsed.goalAmount === 'number') setPiggyGoal(formatNumberInput(String(parsed.goalAmount)));
-                            if (typeof parsed.targetDate === 'string') setPiggyTargetDate(new Date(parsed.targetDate));
-                            supabaseService.upsertPiggyPlan(parsed).catch(() => {});
-                        }
-                    }
-                } catch (e) {}
-            }
-
-            if (fetchedGoldState && typeof fetchedGoldState.totalPhan === 'number') {
-                setGoldState({
-                    id: fetchedGoldState.id || 'gold-default',
-                    totalPhan: fetchedGoldState.totalPhan,
-                    brandTotals: fetchedGoldState.brandTotals || {},
-                    updatedAt: fetchedGoldState.updatedAt
-                });
-            } else {
-                try {
-                    const rawGold = localStorage.getItem('goldState_v1');
-                    if (rawGold) {
-                        const parsedGold = JSON.parse(rawGold);
-                        if (parsedGold && typeof parsedGold.totalPhan === 'number') {
-                            const normalizedGold = { 
-                                id: parsedGold.id || 'gold-default', 
-                                totalPhan: parsedGold.totalPhan, 
-                                brandTotals: parsedGold.brandTotals || {},
-                                updatedAt: parsedGold.updatedAt 
-                            };
-                            setGoldState(normalizedGold);
-                            supabaseService.upsertGoldState(normalizedGold).catch(() => {});
-                        }
-                    }
-                } catch (e) {}
-            }
         } catch (error) {
             console.error("Failed to load data from Supabase:", error);
-            // Don't show alert loop, just UI state
             setConfigError("Không thể kết nối đến dữ liệu. Vui lòng kiểm tra cấu hình Supabase.");
         } finally {
             setIsLoading(false);
@@ -247,63 +131,23 @@ export default function App() {
     };
 
     loadData();
-  }, []);
-
-  useEffect(() => {
-      try {
-          if (!piggyPlan) {
-              localStorage.removeItem('piggyPlan_v1');
-              return;
-          }
-          localStorage.setItem('piggyPlan_v1', JSON.stringify(piggyPlan));
-      } catch (e) {}
-      if (!piggyPlan) return;
-      const t = window.setTimeout(() => {
-          supabaseService.upsertPiggyPlan(piggyPlan).catch(() => {});
-      }, 800);
-      return () => window.clearTimeout(t);
-  }, [piggyPlan]);
-
-  useEffect(() => {
-      try {
-          if (!goldState) {
-              localStorage.removeItem('goldState_v1');
-              return;
-          }
-          localStorage.setItem('goldState_v1', JSON.stringify(goldState));
-      } catch (e) {}
-      if (!goldState) return;
-      const t = window.setTimeout(() => {
-          supabaseService.upsertGoldState(goldState).catch(() => {});
-      }, 800);
-      return () => window.clearTimeout(t);
-  }, [goldState]);
+  }, [activeShop]);
 
   // Derived Values
   const totalBalance = accounts
-    .filter(a => a.id === AccountType.CASH || a.id === AccountType.MB || a.id === AccountType.SAVING || a.id === AccountType.TCB)
+    .filter(a => a.id !== AccountType.TET_SAVING)
     .reduce((acc, curr) => acc + curr.balance, 0);
   
-  // Calculate Debt
-  const activeTransactions = transactions.filter(t => !t.isSettled && t.type !== TransactionType.TRANSFER && t.type !== TransactionType.SETTLEMENT && t.type !== TransactionType.INCOME);
-  
-  // Logic: Nợ = Chi tiêu (cho Mèo) - Các khoản Mèo đã đóng (INCOME + MEO_PAID)
-  // Tuy nhiên, logic hiện tại đang tách biệt.
-  // Để đơn giản:
-  // 1. TransactionDebt tính toán các khoản chi tiêu chưa thanh toán.
-  // 2. Nếu có Income từ Mèo (SplitType.MEO_PAID), nó sẽ làm giảm nợ.
   const transactionDebt = transactions
     .filter(t => !t.isSettled && t.type !== TransactionType.TRANSFER && t.type !== TransactionType.SETTLEMENT)
     .reduce((sum, t) => {
-      // Nếu là chi tiêu
       if (t.type === TransactionType.EXPENSE) {
           if (t.splitType === SplitType.MEO_ONLY) return sum + t.amount;
           if (t.splitType === SplitType.SHARED) return sum + (t.amount / 2);
-          if (t.splitType === SplitType.MEO_PAID) return sum - t.amount; // Mèo trả hộ -> Tôi nợ Mèo (Giảm nợ của Mèo)
+          if (t.splitType === SplitType.MEO_PAID) return sum - t.amount;
       }
-      // Nếu là thu nhập (Mèo đóng tiền)
       if (t.type === TransactionType.INCOME && t.splitType === SplitType.MEO_PAID) {
-          return sum - t.amount; // Mèo đóng tiền -> Giảm nợ
+          return sum - t.amount;
       }
       return sum;
     }, 0);
@@ -326,6 +170,35 @@ export default function App() {
         return num * 1000;
     }
     return num;
+  };
+
+  // Smart Amount Suggestions generator
+  // Ví dụ: nhập 1 -> 1.000, 10.000, 100.000, 1.000.000
+  // nhập 10 -> 10.000, 100.000, 1.000.000, 10.000.000
+  const getAmountSuggestions = (val: string): number[] => {
+    const raw = val.replace(/\D/g, '');
+    if (!raw) {
+      return [20000, 50000, 100000, 200000, 500000];
+    }
+    const n = parseInt(raw, 10);
+    if (isNaN(n) || n <= 0) return [];
+
+    const list: number[] = [];
+    if (n < 1000) {
+      list.push(n * 1000);
+      list.push(n * 10000);
+      list.push(n * 100000);
+      if (n * 1000000 <= 100000000) {
+        list.push(n * 1000000);
+      }
+    } else if (n < 100000) {
+      list.push(n);
+      list.push(n * 10);
+      list.push(n * 100);
+    } else {
+      list.push(n);
+    }
+    return Array.from(new Set(list)).filter(v => v <= 1000000000);
   };
 
   const formatCurrency = (amount: number) => {
@@ -360,7 +233,6 @@ export default function App() {
   const handleUpdateBalance = async (id: string, newBalance: number) => {
     try {
         await supabaseService.updateAccountBalance(id, newBalance);
-        // Optimistic update
         setAccounts(prev => prev.map(acc => acc.id === id ? { ...acc, balance: newBalance } : acc));
     } catch (error) {
         console.error("Error updating balance", error);
@@ -373,8 +245,7 @@ export default function App() {
     if (!tx) return;
 
     if (tx.isSettled && tx.type !== TransactionType.SETTLEMENT && tx.type !== TransactionType.INCOME) {
-        // Allow deleting settled INCOME if it was a fund deposit
-        alert('Giao dịch này đã được quyết toán (lock). Vui lòng xoá Bill (Thanh toán nợ) tương ứng trước để mở khoá.');
+        alert('Giao dịch này đã được quyết toán. Vui lòng xoá Hoá đơn thanh toán tương ứng trước.');
         return;
     }
 
@@ -385,44 +256,30 @@ export default function App() {
     if (!deletingTx) return;
     const { id, amount, accountId, toAccountId, type, splitType } = deletingTx;
 
-    // Calculate new balances locally to send to DB
     const updates: { id: string, amount: number }[] = [];
     const getAccountBalance = (accId: string) => accounts.find(a => a.id === accId)?.balance || 0;
 
     if (type === TransactionType.TRANSFER && toAccountId) {
-        // Revert transfer: Add back to Source, Subtract from Dest
         updates.push({ id: accountId, amount: getAccountBalance(accountId) + amount });
         updates.push({ id: toAccountId, amount: getAccountBalance(toAccountId) - amount });
     } else {
-        // Single account impact
         let newBalance = getAccountBalance(accountId);
-        
-        // LOGIC XOÁ: Đảo ngược lại hành động lúc tạo
         if (type === TransactionType.INCOME || type === TransactionType.SETTLEMENT) {
-            // Lúc tạo là cộng tiền -> Xoá là trừ tiền
             newBalance -= amount;
         } else if (type === TransactionType.EXPENSE) {
-             if (splitType === SplitType.MEO_PAID) {
-                 // Mèo chi -> Không ảnh hưởng số dư -> Xoá cũng không đổi
-             } else {
-                 // Lúc tạo là chi tiêu (Trừ tiền) -> Xoá là cộng tiền
+             if (splitType !== SplitType.MEO_PAID) {
                  newBalance += amount;
              }
         }
-
         updates.push({ id: accountId, amount: newBalance });
     }
 
     try {
-        // 1. Update Balances in DB
         for (const update of updates) {
             await supabaseService.updateAccountBalance(update.id, update.amount);
         }
-
-        // 2. Delete Transaction in DB
         await supabaseService.deleteTransaction(id);
 
-        // 3. Handle Settlement Un-linking
         if (type === TransactionType.SETTLEMENT) {
             await supabaseService.updateTransactionsAsUnsettled(id);
             setTransactions(prev => prev.map(t => {
@@ -435,17 +292,14 @@ export default function App() {
             setTransactions(prev => prev.filter(t => t.id !== id));
         }
 
-        // 4. Update Local Accounts State
         setAccounts(prev => prev.map(acc => {
             const update = updates.find(u => u.id === acc.id);
             return update ? { ...acc, balance: update.amount } : acc;
         }));
-
     } catch (error) {
         console.error("Error deleting transaction", error);
         alert("Có lỗi khi xoá giao dịch!");
     }
-    
     setDeletingTx(null);
   };
 
@@ -471,10 +325,8 @@ export default function App() {
     const updates: { id: string, amount: number }[] = [];
     const getAccountBalance = (accId: string) => accounts.find(a => a.id === accId)?.balance || 0;
 
-    // Update balance if amount changed and it's not a transfer (we disable editing amount for transfers to keep it simple)
     if (amountDiff !== 0 && type !== TransactionType.TRANSFER) {
         let newBalance = getAccountBalance(accountId);
-        
         if (type === TransactionType.INCOME || type === TransactionType.SETTLEMENT) {
             newBalance += amountDiff;
         } else if (type === TransactionType.EXPENSE) {
@@ -484,7 +336,7 @@ export default function App() {
         }
         updates.push({ id: accountId, amount: newBalance });
     } else if (amountDiff !== 0 && type === TransactionType.TRANSFER) {
-        alert("Không hỗ trợ sửa số tiền của giao dịch chuyển khoản. Vui lòng xoá và tạo lại.");
+        alert("Không hỗ trợ sửa số tiền chuyển khoản. Vui lòng xoá và tạo lại.");
         return;
     }
 
@@ -515,7 +367,7 @@ export default function App() {
     }
   };
 
-  // TÍNH NĂNG MỚI: Mèo nạp quỹ 300k
+  // Mèo nạp quỹ 300k
   const handleMeoDeposit = async () => {
     const AMOUNT = 300000;
     const mbAcc = accounts.find(a => a.id === AccountType.MB);
@@ -524,19 +376,17 @@ export default function App() {
         return;
     }
 
-    // Xác nhận
-    if (!window.confirm("Xác nhận Mèo đóng quỹ 300.000đ vào MB Bank?")) return;
+    if (!window.confirm("Xác nhận Mèo nạp quỹ 300.000đ vào MB Bank?")) return;
 
-    // Tạo giao dịch Income
     const newTx: Transaction = {
         id: Date.now().toString(),
         date: new Date().toISOString(),
         description: "Mèo đóng quỹ",
         amount: AMOUNT,
         accountId: AccountType.MB,
-        splitType: SplitType.MEO_PAID, // Đánh dấu là Mèo trả để giảm nợ trong tính toán
-        type: TransactionType.INCOME, // Tiền vào
-        isSettled: false // Chưa settle để hiển thị trong lịch sử tính toán (như một khoản giảm trừ)
+        splitType: SplitType.MEO_PAID,
+        type: TransactionType.INCOME,
+        isSettled: false
     };
 
     const newBalance = mbAcc.balance + AMOUNT;
@@ -546,8 +396,6 @@ export default function App() {
             supabaseService.addTransaction(newTx),
             supabaseService.updateAccountBalance(AccountType.MB, newBalance)
         ]);
-        
-        // Update Local State
         setTransactions(prev => [newTx, ...prev]);
         setAccounts(prev => prev.map(a => a.id === AccountType.MB ? {...a, balance: newBalance} : a));
     } catch (e) {
@@ -573,7 +421,6 @@ export default function App() {
         isSettled: qaType === TransactionType.INCOME ? true : false
     };
 
-    // Calculate new balance
     const currentAcc = accounts.find(a => a.id === qaAccount);
     if (!currentAcc) return;
 
@@ -581,25 +428,19 @@ export default function App() {
     if (qaType === TransactionType.INCOME) {
         newBalance += amountVal;
     } else {
-        // Expense
-        if (qaSplit === SplitType.MEO_PAID) {
-             // Mèo chi -> Không trừ tiền của mình
-        } else {
+        if (qaSplit !== SplitType.MEO_PAID) {
              newBalance -= amountVal;
         }
     }
 
     try {
         const promises: Promise<any>[] = [supabaseService.addTransaction(newTx)];
-        
-        // Chỉ update balance nếu có thay đổi
         if (newBalance !== currentAcc.balance) {
             promises.push(supabaseService.updateAccountBalance(qaAccount, newBalance));
         }
 
         await Promise.all(promises);
 
-        // Optimistic UI Update
         setTransactions(prev => [newTx, ...prev]);
         setAccounts(prev => prev.map(acc => 
             acc.id === qaAccount ? { ...acc, balance: newBalance } : acc
@@ -615,6 +456,7 @@ export default function App() {
     }
   };
 
+  // Standardized internal transfer without TET_SAVING
   const handleTransfer = async () => {
     const amountVal = parseSmartAmount(transferAmount);
     if (amountVal <= 0) return;
@@ -627,7 +469,7 @@ export default function App() {
     const newTx: Transaction = {
       id: Date.now().toString(),
       date: new Date().toISOString(),
-      description: `Chuyển tiền: ${fromAcc.name} -> ${toAcc.name}`,
+      description: `Chuyển tiền: ${fromAcc.name} → ${toAcc.name}`,
       amount: amountVal,
       accountId: transferFrom,
       toAccountId: transferTo,
@@ -636,54 +478,20 @@ export default function App() {
       isSettled: true
     };
 
-    let newFromBalance = fromAcc.balance;
-    let newToBalance = toAcc.balance;
-    let mbBalanceUpdate: number | null = null;
-
-    if (transferFrom === AccountType.MB && transferTo === AccountType.TET_SAVING) {
-        // MB -> TET_SAVING: MB (Thực tế) unchanged, TET_SAVING increases
-        newFromBalance = fromAcc.balance;
-        newToBalance = toAcc.balance + amountVal;
-    } else if (transferFrom === AccountType.TET_SAVING && transferTo === AccountType.MB) {
-        // TET_SAVING -> MB: MB (Thực tế) unchanged, TET_SAVING decreases
-        newFromBalance = fromAcc.balance - amountVal;
-        newToBalance = toAcc.balance;
-    } else if (transferTo === AccountType.TET_SAVING) {
-        // Other -> TET_SAVING: Other decreases, TET_SAVING increases, MB (Thực tế) increases
-        newFromBalance = fromAcc.balance - amountVal;
-        newToBalance = toAcc.balance + amountVal;
-        const mbAcc = accounts.find(a => a.id === AccountType.MB);
-        if (mbAcc) mbBalanceUpdate = mbAcc.balance + amountVal;
-    } else if (transferFrom === AccountType.TET_SAVING) {
-        // TET_SAVING -> Other: TET_SAVING decreases, Other increases, MB (Thực tế) decreases
-        newFromBalance = fromAcc.balance - amountVal;
-        newToBalance = toAcc.balance + amountVal;
-        const mbAcc = accounts.find(a => a.id === AccountType.MB);
-        if (mbAcc) mbBalanceUpdate = mbAcc.balance - amountVal;
-    } else {
-        // Normal transfer
-        newFromBalance = fromAcc.balance - amountVal;
-        newToBalance = toAcc.balance + amountVal;
-    }
+    const newFromBalance = fromAcc.balance - amountVal;
+    const newToBalance = toAcc.balance + amountVal;
 
     try {
-        const promises = [
+        await Promise.all([
             supabaseService.addTransaction(newTx),
             supabaseService.updateAccountBalance(transferFrom, newFromBalance),
             supabaseService.updateAccountBalance(transferTo, newToBalance)
-        ];
-        
-        if (mbBalanceUpdate !== null) {
-            promises.push(supabaseService.updateAccountBalance(AccountType.MB, mbBalanceUpdate));
-        }
-
-        await Promise.all(promises);
+        ]);
 
         setTransactions(prev => [newTx, ...prev]);
         setAccounts(prev => prev.map(acc => {
             if (acc.id === transferFrom) return { ...acc, balance: newFromBalance };
             if (acc.id === transferTo) return { ...acc, balance: newToBalance };
-            if (mbBalanceUpdate !== null && acc.id === AccountType.MB) return { ...acc, balance: mbBalanceUpdate };
             return acc;
         }));
 
@@ -695,497 +503,28 @@ export default function App() {
     }
   };
 
-  const toDateKey = (d: Date) => {
-      const dd = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-      const y = dd.getFullYear();
-      const m = String(dd.getMonth() + 1).padStart(2, '0');
-      const day = String(dd.getDate()).padStart(2, '0');
-      return `${y}-${m}-${day}`;
-  };
-
-  const parseDateKey = (key: string) => {
-      const [y, m, d] = key.split('-').map(n => parseInt(n, 10));
-      return new Date(y, (m || 1) - 1, d || 1);
-  };
-
-  const applyTransferInternal = async (from: AccountType, to: AccountType, amountVal: number, description: string) => {
-      const fromAcc = accounts.find(a => a.id === from);
-      const toAcc = accounts.find(a => a.id === to);
-      if (!fromAcc || !toAcc) throw new Error('Missing account');
-
-      const newTx: Transaction = {
-          id: Date.now().toString(),
-          date: new Date().toISOString(),
-          description,
-          amount: amountVal,
-          accountId: from,
-          toAccountId: to,
-          splitType: SplitType.ME_ONLY,
-          type: TransactionType.TRANSFER,
-          isSettled: true
-      };
-
-      let newFromBalance = fromAcc.balance;
-      let newToBalance = toAcc.balance;
-      let mbBalanceUpdate: number | null = null;
-
-      if (from === AccountType.MB && to === AccountType.TET_SAVING) {
-          newFromBalance = fromAcc.balance;
-          newToBalance = toAcc.balance + amountVal;
-      } else if (from === AccountType.TET_SAVING && to === AccountType.MB) {
-          newFromBalance = fromAcc.balance - amountVal;
-          newToBalance = toAcc.balance;
-      } else if (to === AccountType.TET_SAVING) {
-          newFromBalance = fromAcc.balance - amountVal;
-          newToBalance = toAcc.balance + amountVal;
-          const mbAcc = accounts.find(a => a.id === AccountType.MB);
-          if (mbAcc) mbBalanceUpdate = mbAcc.balance + amountVal;
-      } else if (from === AccountType.TET_SAVING) {
-          newFromBalance = fromAcc.balance - amountVal;
-          newToBalance = toAcc.balance + amountVal;
-          const mbAcc = accounts.find(a => a.id === AccountType.MB);
-          if (mbAcc) mbBalanceUpdate = mbAcc.balance - amountVal;
-      } else {
-          newFromBalance = fromAcc.balance - amountVal;
-          newToBalance = toAcc.balance + amountVal;
-      }
-
-      const promises = [
-          supabaseService.addTransaction(newTx),
-          supabaseService.updateAccountBalance(from, newFromBalance),
-          supabaseService.updateAccountBalance(to, newToBalance)
-      ];
-      if (mbBalanceUpdate !== null) {
-          promises.push(supabaseService.updateAccountBalance(AccountType.MB, mbBalanceUpdate));
-      }
-
-      await Promise.all(promises);
-
-      setTransactions(prev => [newTx, ...prev]);
-      setAccounts(prev => prev.map(acc => {
-          if (acc.id === from) return { ...acc, balance: newFromBalance };
-          if (acc.id === to) return { ...acc, balance: newToBalance };
-          if (mbBalanceUpdate !== null && acc.id === AccountType.MB) return { ...acc, balance: mbBalanceUpdate };
-          return acc;
-      }));
-
-      return newTx.id;
-  };
-
-  const generatePiggyPlanDays = (goalAmount: number, targetDate: Date) => {
-      const start = new Date();
-      const startLocal = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-      const endLocal = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate());
-      if (endLocal.getTime() < startLocal.getTime()) return [];
-
-      const dates: Date[] = [];
-      const cursor = new Date(startLocal);
-      while (cursor.getTime() <= endLocal.getTime()) {
-          dates.push(new Date(cursor));
-          cursor.setDate(cursor.getDate() + 1);
-      }
-
-      const n = dates.length;
-      if (n === 0) return [];
-
-      let unit = 1000;
-      if (goalAmount < n * 1000) unit = 100;
-      if (goalAmount < n * 100) unit = 1;
-
-      const totalUnits = Math.floor(goalAmount / unit);
-      const remainder = goalAmount - totalUnits * unit;
-
-      const minUnits = totalUnits >= n ? 1 : 0;
-      const units = Array(n).fill(minUnits);
-      let remaining = totalUnits - minUnits * n;
-
-      if (remaining > 0) {
-          const weights = Array.from({ length: n }, () => Math.random());
-          const sumW = weights.reduce((s, w) => s + w, 0) || 1;
-          const alloc = weights.map(w => Math.floor((w / sumW) * remaining));
-          let used = 0;
-          for (let i = 0; i < n; i++) {
-              units[i] += alloc[i];
-              used += alloc[i];
-          }
-          let leftover = remaining - used;
-          while (leftover > 0) {
-              const idx = Math.floor(Math.random() * n);
-              units[idx] += 1;
-              leftover -= 1;
-          }
-      }
-
-      const days: PiggyDay[] = dates.map((d, i) => ({
-          date: toDateKey(d),
-          amount: units[i] * unit,
-          done: false
-      }));
-
-      if (remainder > 0) {
-          days[days.length - 1] = { ...days[days.length - 1], amount: days[days.length - 1].amount + remainder };
-      }
-
-      const total = days.reduce((s, x) => s + x.amount, 0);
-      if (total !== goalAmount) {
-          const diff = goalAmount - total;
-          days[days.length - 1] = { ...days[days.length - 1], amount: Math.max(0, days[days.length - 1].amount + diff) };
-      }
-
-      return days;
-  };
-
-  const handleCreatePiggyPlan = () => {
-      const goalAmount = parseSmartAmount(piggyGoal);
-      if (goalAmount <= 0) {
-          alert('Vui lòng nhập số tiền mục tiêu');
-          return;
-      }
-      const days = generatePiggyPlanDays(goalAmount, piggyTargetDate);
-      if (days.length === 0) {
-          alert('Ngày hoàn thành không hợp lệ');
-          return;
-      }
-      const plan: PiggyPlan = {
-          id: 'piggy-' + Date.now().toString(),
-          goalAmount,
-          startDate: toDateKey(new Date()),
-          targetDate: new Date(piggyTargetDate.getFullYear(), piggyTargetDate.getMonth(), piggyTargetDate.getDate()).toISOString(),
-          createdAt: new Date().toISOString(),
-          days
-      };
-      setPiggyPlan(plan);
-  };
-
-  const handleTogglePiggyDay = async (dateKey: string) => {
-      if (!piggyPlan) return;
-      const day = piggyPlan.days.find(d => d.date === dateKey);
-      if (!day) return;
-      const amountVal = day.amount;
-      if (amountVal <= 0) return;
-
-      const mb = accounts.find(a => a.id === AccountType.MB)?.balance || 0;
-      const tet = accounts.find(a => a.id === AccountType.TET_SAVING)?.balance || 0;
-      const available = mb - tet;
-
-      try {
-          if (!day.done) {
-              if (available < amountVal) {
-                  alert('Số dư khả dụng MB Bank không đủ');
-                  return;
-              }
-              const txId = await applyTransferInternal(
-                  AccountType.MB,
-                  AccountType.TET_SAVING,
-                  amountVal,
-                  `Ống heo: Góp ${parseDateKey(dateKey).toLocaleDateString('vi-VN')}`
-              );
-              setPiggyPlan(prev => {
-                  if (!prev) return prev;
-                  return {
-                      ...prev,
-                      days: prev.days.map(d => d.date === dateKey ? { ...d, done: true, txId, doneAt: new Date().toISOString() } : d)
-                  };
-              });
-          } else {
-              const reversedTxId = await applyTransferInternal(
-                  AccountType.TET_SAVING,
-                  AccountType.MB,
-                  amountVal,
-                  `Ống heo: Hoàn tác ${parseDateKey(dateKey).toLocaleDateString('vi-VN')}`
-              );
-              setPiggyPlan(prev => {
-                  if (!prev) return prev;
-                  return {
-                      ...prev,
-                      days: prev.days.map(d => d.date === dateKey ? { ...d, done: false, reversedTxId, undoneAt: new Date().toISOString() } : d)
-                  };
-              });
-          }
-      } catch (e) {
-          console.error('Piggy transfer error', e);
-          alert('Lỗi khi chuyển tiền Ống heo');
-      }
-  };
-
-  const parseNonNegativeInt = (raw: string) => {
-      const cleaned = (raw || '').replace(/[^\d]/g, '');
-      const v = parseInt(cleaned || '0', 10);
-      return Number.isFinite(v) && v >= 0 ? v : 0;
-  };
-
-  const normalizeGoldUnits = (luong: number, chi: number, phan: number) => {
-      let p = Math.max(0, phan);
-      let c = Math.max(0, chi);
-      let l = Math.max(0, luong);
-      c += Math.floor(p / 10);
-      p = p % 10;
-      l += Math.floor(c / 10);
-      c = c % 10;
-      return { luong: l, chi: c, phan: p };
-  };
-
-  const toTotalPhan = (luong: number, chi: number, phan: number) => luong * 100 + chi * 10 + phan;
-
-  const fromTotalPhan = (totalPhan: number) => {
-      const safe = Math.max(0, Math.floor(totalPhan || 0));
-      const luong = Math.floor(safe / 100);
-      const chi = Math.floor((safe % 100) / 10);
-      const phan = safe % 10;
-      return { luong, chi, phan };
-  };
-
-  const handleBuyGold = async () => {
-      const amountVal = parseSmartAmount(goldBuyAmount);
-      const luongRaw = parseNonNegativeInt(goldBuyLuong);
-      const chiRaw = parseNonNegativeInt(goldBuyChi);
-      const phanRaw = parseNonNegativeInt(goldBuyPhan);
-      const normalized = normalizeGoldUnits(luongRaw, chiRaw, phanRaw);
-      const totalPhan = toTotalPhan(normalized.luong, normalized.chi, normalized.phan);
-
-      if (amountVal <= 0) {
-          alert('Vui lòng nhập số tiền mua vàng');
-          return;
-      }
-      if (totalPhan <= 0) {
-          alert('Vui lòng nhập số lượng vàng (phân/chỉ/lượng)');
-          return;
-      }
-
-      const cutoffDate = new Date(2026, 2, 21); // 21/03/2026
-      const isAfterCutoff = goldBuyDate >= cutoffDate;
-
-      const mbAcc = accounts.find(a => a.id === AccountType.MB);
-      const tetAcc = accounts.find(a => a.id === AccountType.TET_SAVING);
-      
-      if (isAfterCutoff) {
-          if (!mbAcc || !tetAcc) {
-              alert('Không tìm thấy ví MB Bank hoặc Tiết kiệm ăn Tết');
-              return;
-          }
-          if (tetAcc.balance < amountVal) {
-              alert('Tiết kiệm ăn Tết không đủ để mua vàng');
-              return;
-          }
-          if (mbAcc.balance < amountVal) {
-              alert('Số dư MB Bank không đủ để mua vàng');
-              return;
-          }
-      }
-
-      const qtyText = `${normalized.luong} lượng ${normalized.chi} chỉ ${normalized.phan} phân`;
-      const newTx: Transaction = {
-          id: 'gold-buy-' + Date.now().toString(),
-          date: goldBuyDate.toISOString(),
-          description: `Mua vàng ${goldBuyBrand} (${qtyText})`,
-          amount: amountVal,
-          accountId: isAfterCutoff ? AccountType.TET_SAVING : AccountType.CASH, // Use CASH as placeholder if before cutoff
-          splitType: SplitType.ME_ONLY,
-          type: TransactionType.EXPENSE,
-          isSettled: true
-      };
-
-      const newTet = isAfterCutoff ? tetAcc!.balance - amountVal : tetAcc?.balance || 0;
-      const newMb = isAfterCutoff ? mbAcc!.balance - amountVal : mbAcc?.balance || 0;
-
-      try {
-          const promises: Promise<any>[] = [];
-          
-          // Only add transaction if it's after cutoff? Actually, better to add it anyway but maybe mark it differently?
-          // The user said "không bị trừ vào tiền...". So I'll add the transaction but maybe not update the balance.
-          // But if I add a transaction of type EXPENSE, it usually implies a balance change.
-          // I'll add the transaction but only update balances if isAfterCutoff.
-          
-          promises.push(supabaseService.addTransaction(newTx));
-          
-          if (isAfterCutoff) {
-              promises.push(supabaseService.updateAccountBalance(AccountType.TET_SAVING, newTet));
-              promises.push(supabaseService.updateAccountBalance(AccountType.MB, newMb));
-          }
-
-          await Promise.all(promises);
-
-          setTransactions(prev => [newTx, ...prev]);
-          if (isAfterCutoff) {
-              setAccounts(prev => prev.map(acc => {
-                  if (acc.id === AccountType.TET_SAVING) return { ...acc, balance: newTet };
-                  if (acc.id === AccountType.MB) return { ...acc, balance: newMb };
-                  return acc;
-              }));
-          }
-
-          setGoldState(prev => {
-              const base: GoldState = prev && typeof prev.totalPhan === 'number'
-                  ? prev
-                  : { id: 'gold-default', totalPhan: 0, brandTotals: {}, brandMoneySpent: {}, brands: GOLD_BRANDS };
-              
-              const currentBrandTotals = base.brandTotals || {};
-              const currentBrandMoneySpent = base.brandMoneySpent || {};
-              const currentBrands = base.brands || GOLD_BRANDS;
-              
-              const newBrandTotals = {
-                  ...currentBrandTotals,
-                  [goldBuyBrand]: (currentBrandTotals[goldBuyBrand] || 0) + totalPhan
-              };
-              
-              const newBrandMoneySpent = {
-                  ...currentBrandMoneySpent,
-                  [goldBuyBrand]: (currentBrandMoneySpent[goldBuyBrand] || 0) + amountVal
-              };
-
-              const newBrands = currentBrands.includes(goldBuyBrand) 
-                ? currentBrands 
-                : [...currentBrands, goldBuyBrand];
-
-              return {
-                  ...base,
-                  id: base.id || 'gold-default',
-                  totalPhan: Math.max(0, (base.totalPhan || 0) + totalPhan),
-                  brandTotals: newBrandTotals,
-                  brandMoneySpent: newBrandMoneySpent,
-                  brands: newBrands,
-                  updatedAt: new Date().toISOString()
-              };
-          });
-
-          setGoldBuyAmount('');
-          setGoldBuyLuong('');
-          setGoldBuyChi('');
-          setGoldBuyPhan('');
-      } catch (e) {
-          console.error('Buy gold error', e);
-          alert('Lỗi khi mua vàng');
-      }
-  };
-
-  const handleWithdrawGold = async () => {
-      const amountVal = parseSmartAmount(goldWithdrawAmount);
-      const luongRaw = parseNonNegativeInt(goldWithdrawLuong);
-      const chiRaw = parseNonNegativeInt(goldWithdrawChi);
-      const phanRaw = parseNonNegativeInt(goldWithdrawPhan);
-      const normalized = normalizeGoldUnits(luongRaw, chiRaw, phanRaw);
-      const totalPhan = toTotalPhan(normalized.luong, normalized.chi, normalized.phan);
-
-      if (totalPhan <= 0) {
-          alert('Vui lòng nhập số lượng vàng rút');
-          return;
-      }
-
-      const currentBrandTotal = (goldState?.brandTotals || {})[goldWithdrawBrand] || 0;
-      if (currentBrandTotal < totalPhan) {
-          alert(`Số lượng vàng ${goldWithdrawBrand} không đủ để rút (Hiện có: ${fromTotalPhan(currentBrandTotal).luong}L ${fromTotalPhan(currentBrandTotal).chi}C ${fromTotalPhan(currentBrandTotal).phan}P)`);
-          return;
-      }
-
-      const mbAcc = accounts.find(a => a.id === AccountType.MB);
-      if (!mbAcc) {
-          alert('Không tìm thấy ví MB Bank');
-          return;
-      }
-
-      const qtyText = `${normalized.luong} lượng ${normalized.chi} chỉ ${normalized.phan} phân`;
-      const newTx: Transaction = {
-          id: 'gold-withdraw-' + Date.now().toString(),
-          date: new Date().toISOString(),
-          description: `Bán chốt lãi vàng ${goldWithdrawBrand} (${qtyText})`,
-          amount: amountVal,
-          accountId: AccountType.MB,
-          splitType: SplitType.ME_ONLY,
-          type: TransactionType.INCOME,
-          isSettled: true
-      };
-
-      const newMb = mbAcc.balance + amountVal;
-
-      try {
-          await Promise.all([
-              supabaseService.addTransaction(newTx),
-              supabaseService.updateAccountBalance(AccountType.MB, newMb)
-          ]);
-
-          setTransactions(prev => [newTx, ...prev]);
-          setAccounts(prev => prev.map(acc => {
-              if (acc.id === AccountType.MB) return { ...acc, balance: newMb };
-              return acc;
-          }));
-
-          setGoldState(prev => {
-              if (!prev) return null;
-              const currentBrandTotals = prev.brandTotals || {};
-              const currentBrandMoneySpent = prev.brandMoneySpent || {};
-              
-              const oldPhan = currentBrandTotals[goldWithdrawBrand] || 0;
-              const oldMoney = currentBrandMoneySpent[goldWithdrawBrand] || 0;
-              
-              const newPhan = Math.max(0, oldPhan - totalPhan);
-              // Reduce money spent proportionally to reflect cost basis of remaining gold
-              const newMoney = oldPhan > 0 ? Math.round(oldMoney * (newPhan / oldPhan)) : 0;
-
-              const newBrandTotals = {
-                  ...currentBrandTotals,
-                  [goldWithdrawBrand]: newPhan
-              };
-              
-              const newBrandMoneySpent = {
-                  ...currentBrandMoneySpent,
-                  [goldWithdrawBrand]: newMoney
-              };
-
-              return {
-                  ...prev,
-                  totalPhan: Math.max(0, (prev.totalPhan || 0) - totalPhan),
-                  brandTotals: newBrandTotals,
-                  brandMoneySpent: newBrandMoneySpent,
-                  updatedAt: new Date().toISOString()
-              };
-          });
-
-          setGoldWithdrawAmount('');
-          setGoldWithdrawLuong('');
-          setGoldWithdrawChi('');
-          setGoldWithdrawPhan('');
-          setShowGoldWithdraw(false);
-      } catch (e) {
-          console.error('Withdraw gold error', e);
-          alert('Lỗi khi rút vàng');
-      }
-  };
-
-  const handleClearGoldHistory = async () => {
-    if (!window.confirm("Bạn có chắc chắn muốn xoá toàn bộ lịch sử mua/rút vàng và đặt lại số dư vàng về 0? Hành động này không thể hoàn tác.")) return;
-
+  const handleLogQRTransfer = async (data: { amount: number; description: string; account: AccountType }) => {
     try {
-      // 1. Find gold transactions
-      const goldTxs = transactions.filter(t => 
-        t.description?.toLowerCase().includes("vàng")
-      );
-      
-      // 2. Delete from Supabase in bulk
-      if (goldTxs.length > 0) {
-        await supabaseService.deleteTransactions(goldTxs.map(tx => tx.id));
-      }
-
-      // 3. Reset Gold State
-      const newGoldState: GoldState = {
-        id: goldState?.id || 'gold-default',
-        totalPhan: 0,
-        brandTotals: {},
-        brandMoneySpent: {},
-        brands: GOLD_BRANDS,
-        updatedAt: new Date().toISOString()
+      const newTx: Transaction = {
+        id: 'qr-' + Date.now().toString(),
+        date: new Date().toISOString(),
+        description: data.description,
+        amount: data.amount,
+        accountId: data.account,
+        splitType: SplitType.ME_ONLY,
+        type: TransactionType.EXPENSE,
+        isSettled: true
       };
-      setGoldState(newGoldState);
-      await supabaseService.upsertGoldState(newGoldState);
-
-      // 4. Update local transactions
-      setTransactions(prev => prev.filter(t => 
-        !t.description?.toLowerCase().includes("vàng")
-      ));
-
-      alert("Đã xoá toàn bộ lịch sử vàng.");
-    } catch (e) {
-      console.error("Clear gold history error", e);
-      alert("Lỗi khi xoá lịch sử vàng.");
+      await supabaseService.addTransaction(newTx);
+      const targetAcc = accounts.find(a => a.id === data.account);
+      if (targetAcc) {
+        const newBal = targetAcc.balance - data.amount;
+        await supabaseService.updateAccountBalance(data.account, newBal);
+        setAccounts(prev => prev.map(a => a.id === data.account ? { ...a, balance: newBal } : a));
+      }
+      setTransactions(prev => [newTx, ...prev]);
+    } catch (err) {
+      console.error("Error logging QR transfer:", err);
     }
   };
 
@@ -1193,7 +532,6 @@ export default function App() {
     const settlementId = 'settle-' + Date.now().toString();
     const newTransactions: Transaction[] = [];
 
-    // 1. Prepare Settlement Transaction
     if (finalPayment > 0) {
         newTransactions.push({
             id: settlementId,
@@ -1207,14 +545,13 @@ export default function App() {
         });
     }
 
-    // 2. Prepare Surplus Transaction
     if (surplus !== 0) {
         newTransactions.push({
             id: 'surplus-' + Date.now().toString(),
             date: new Date().toISOString(),
             description: surplus > 0 ? 'Dư kỳ trước (Kết chuyển)' : 'Nợ cũ kỳ trước (Chưa trả hết)',
             amount: Math.abs(surplus),
-            accountId: AccountType.MB, // Virtual/Tracking
+            accountId: AccountType.MB,
             splitType: surplus > 0 ? SplitType.MEO_PAID : SplitType.MEO_ONLY, 
             type: TransactionType.EXPENSE,
             isSettled: false
@@ -1222,20 +559,13 @@ export default function App() {
     }
 
     try {
-        // Execute Supabase Updates
         const promises = [];
-        
-        // Add new transactions
         for (const tx of newTransactions) {
             promises.push(supabaseService.addTransaction(tx));
         }
-        
-        // Update old transactions as settled
         if (txIds.length > 0) {
             promises.push(supabaseService.updateTransactionsAsSettled(txIds, settlementId));
         }
-
-        // Update MB Balance if payment made
         if (finalPayment > 0) {
             const mbAcc = accounts.find(a => a.id === AccountType.MB);
             if (mbAcc) {
@@ -1245,7 +575,6 @@ export default function App() {
 
         await Promise.all(promises);
 
-        // Update Local State
         setAccounts(prev => prev.map(acc => 
             acc.id === AccountType.MB && finalPayment > 0
                 ? { ...acc, balance: acc.balance + finalPayment } 
@@ -1263,7 +592,6 @@ export default function App() {
         });
 
         setShowBill(false);
-
     } catch (error) {
         console.error("Error settling debts", error);
         alert("Lỗi khi quyết toán.");
@@ -1279,3184 +607,1040 @@ export default function App() {
     });
   };
 
-  // --- Render (Almost same, just added loading overlay) ---
+  // --- RENDERS ---
+
+  // HOME SCREEN (Apple Wallet & Less-is-more aesthetic)
   const renderHome = () => {
-    const goldTotalPhan = goldState?.totalPhan || 0;
-    const goldUnits = fromTotalPhan(goldTotalPhan);
+    const visibleAccounts = accounts.filter(a => a.id !== AccountType.TET_SAVING);
+
     return (
-      <div className="space-y-6 pb-32 animate-fade-in">
-      {/* Header Card */}
-      <div className="relative overflow-hidden rounded-[32px] bg-gradient-to-br from-[#4F46E5] to-[#7C3AED] p-6 text-white shadow-xl shadow-indigo-200">
-         <div className="absolute -top-10 -right-10 w-40 h-40 bg-white opacity-10 rounded-full blur-2xl"></div>
-         <div className="absolute bottom-0 left-0 w-32 h-32 bg-purple-500 opacity-20 rounded-full blur-xl"></div>
-         <div className="relative z-10">
-             <div className="flex justify-between items-start mb-6">
-                 <div>
-                     <p className="text-indigo-100 text-sm font-medium mb-1 opacity-80">Tổng tài sản</p>
-                     <h1 className="text-4xl font-bold tracking-tight">{formatCurrency(totalBalance)}</h1>
-                 </div>
-                 <button 
-                    onClick={() => setShowBill(true)}
-                    className="bg-white/20 backdrop-blur-md hover:bg-white/30 active:scale-95 transition-all p-3 rounded-2xl border border-white/10"
-                 >
-                     <span className="material-symbols-rounded text-white block text-2xl">receipt_long</span>
-                 </button>
-             </div>
-
-             <div className="flex items-center gap-3 bg-white/10 backdrop-blur-md rounded-2xl p-3 border border-white/5">
-                 <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white shadow-lg ${
-                     isCredit ? 'bg-emerald-500 shadow-emerald-900/20' : 'bg-rose-400 shadow-rose-900/20'
-                 }`}>
-                     <span className="material-symbols-rounded">{isCredit ? 'savings' : 'pets'}</span>
-                 </div>
-                 <div className="flex-1">
-                     <p className={`text-xs font-medium ${isCredit ? 'text-emerald-200' : 'text-indigo-100'}`}>
-                         {isCredit ? 'Mèo đang có (Dư)' : 'Mèo đang nợ'}
-                     </p>
-                     <p className="text-lg font-bold">
-                         {formatCurrency(Math.abs(meoDebt))}
-                     </p>
-                 </div>
-                 
-                 {/* QUICK DEPOSIT BUTTON - FIXED STYLE TO AVOID WHITE/INVISIBLE ISSUE */}
-                 <button 
-                     onClick={handleMeoDeposit}
-                     className="bg-emerald-500 text-white px-3 py-2 rounded-xl text-xs font-bold flex items-center gap-1 shadow-lg shadow-emerald-900/20 active:scale-95 transition-all border border-emerald-400/50"
-                 >
-                     <span className="material-symbols-rounded text-base">add_circle</span>
-                     Nạp 300k
-                 </button>
-             </div>
-         </div>
-      </div>
-
-      {/* Monthly Stats */}
-      <MonthlyStats transactions={transactions} />
-
-      {/* Quick Add */}
-      <div>
-         <div className="bg-white rounded-[32px] p-5 shadow-lg shadow-slate-200/50 border border-slate-100 relative overflow-hidden">
-             
-             {/* Transaction Type Switcher */}
-             <div className="flex bg-slate-100 p-1 rounded-2xl mb-6 relative">
-                 <div className={`absolute top-1 bottom-1 w-[calc(50%-4px)] bg-white rounded-xl shadow-sm transition-all duration-300 ease-spring ${
-                     qaType === TransactionType.INCOME ? 'left-[calc(50%+2px)]' : 'left-1'
-                 }`}></div>
-                 <button
-                    onClick={() => setQaType(TransactionType.EXPENSE)}
-                    className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all relative z-10 flex items-center justify-center gap-2 ${
-                        qaType === TransactionType.EXPENSE ? 'text-slate-800' : 'text-slate-400'
-                    }`}
-                 >
-                    <span className="material-symbols-rounded text-lg">shopping_bag</span>
-                    Chi tiêu
-                 </button>
-                 <button
-                    onClick={() => setQaType(TransactionType.INCOME)}
-                    className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all relative z-10 flex items-center justify-center gap-2 ${
-                        qaType === TransactionType.INCOME ? 'text-emerald-600' : 'text-slate-400'
-                    }`}
-                 >
-                    <span className="material-symbols-rounded text-lg">attach_money</span>
-                    Thu nhập
-                 </button>
-             </div>
-
-             <div className="flex flex-col gap-5 mb-6">
-                 <div className="relative">
-                     <input 
-                         type="text"
-                         inputMode="numeric"
-                         value={qaAmount}
-                         onChange={(e) => setQaAmount(formatNumberInput(e.target.value))}
-                         placeholder="0"
-                         className={`w-full text-5xl font-bold tracking-tight placeholder-slate-200 outline-none bg-transparent transition-colors ${
-                             qaType === TransactionType.INCOME ? 'text-emerald-600' : 'text-slate-800'
-                         }`}
-                     />
-                     <span className="absolute top-1/2 -translate-y-1/2 right-0 text-slate-400 text-sm font-medium">VNĐ</span>
-                     {qaAmount && (
-                         <p className={`text-xs font-bold mt-2 flex items-center gap-1 w-fit px-2 py-1 rounded-lg ${
-                             qaType === TransactionType.INCOME 
-                             ? 'text-emerald-700 bg-emerald-50' 
-                             : 'text-indigo-700 bg-indigo-50'
-                         }`}>
-                             <span className="material-symbols-rounded text-[14px]">auto_awesome</span>
-                             {formatCurrency(parseSmartAmount(qaAmount))}
-                         </p>
-                     )}
-                 </div>
-                 
-                 <div className="w-full h-[1px] bg-slate-100"></div>
-                 
-                 <div className="flex items-center gap-3">
-                     <span className="material-symbols-rounded text-slate-400">calendar_month</span>
-                     <DatePicker 
-                         selected={qaDate} 
-                         onChange={(date: Date | null) => date && setQaDate(date)} 
-                         dateFormat="dd/MM/yyyy"
-                         locale={vi}
-                         formatWeekDay={formatShortWeekday}
-                         className="w-full text-sm font-medium text-slate-700 outline-none bg-transparent cursor-pointer"
-                         wrapperClassName="flex-1"
-                     />
-                 </div>
-
-                 <div className="w-full h-[1px] bg-slate-100"></div>
-
-                 <div className="flex items-center gap-3">
-                     <span className="material-symbols-rounded text-slate-400">edit_note</span>
-                     <input 
-                         type="text" 
-                         value={qaDesc}
-                         onChange={(e) => setQaDesc(e.target.value)}
-                         placeholder={qaType === TransactionType.INCOME ? "Nguồn thu nhập..." : "Nội dung chi tiêu..."}
-                         className="w-full text-lg font-medium text-slate-700 placeholder-slate-300 outline-none bg-transparent"
-                     />
-                 </div>
-             </div>
-
-             <div className="mb-5">
-                 <div className="grid grid-cols-3 gap-2">
-                     {[AccountType.MB, AccountType.TCB, AccountType.CASH].map(type => {
-                         const acc = accounts.find(a => a.id === type);
-                         if(!acc) return null;
-                         const isSelected = qaAccount === acc.id;
-                         return (
-                            <button
-                                key={acc.id}
-                                onClick={() => setQaAccount(acc.id as AccountType)}
-                                className={`flex items-center justify-center gap-1.5 px-2 py-2.5 rounded-xl text-[11px] font-black border transition-all active:scale-95 ${
-                                    isSelected 
-                                    ? `bg-slate-800 text-white border-slate-800 shadow-md shadow-slate-200` 
-                                    : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
-                                }`}
-                            >
-                                <div className={`w-2 h-2 rounded-full shrink-0 ${isSelected ? 'bg-white' : acc.color}`}></div>
-                                <span className="truncate">{acc.name}</span>
-                            </button>
-                         );
-                     })}
-                 </div>
-             </div>
-
-             {/* Split Options - ONLY FOR EXPENSE */}
-             {qaType === TransactionType.EXPENSE && (
-                 <div className="mb-6 animate-fade-in">
-                     <div className="grid grid-cols-2 gap-3">
-                         {SPLIT_OPTIONS.map(opt => {
-                             const isSelected = qaSplit === opt.id;
-                             const isMeoPaid = opt.id === 'MEO_PAID';
-                             return (
-                                 <button
-                                    key={opt.id}
-                                    onClick={() => setQaSplit(opt.id as SplitType)}
-                                    className={`px-3 py-3 rounded-2xl text-sm font-medium border text-left flex items-center gap-3 transition-all active:scale-95 ${
-                                        isSelected
-                                        ? (isMeoPaid 
-                                            ? 'bg-cyan-50 border-cyan-500 text-cyan-800 shadow-sm' 
-                                            : 'bg-blue-50 border-blue-500 text-blue-700 shadow-sm')
-                                        : 'bg-white border-slate-200 text-slate-500'
-                                    }`}
-                                 >
-                                     <span className={`material-symbols-rounded text-xl ${
-                                         isSelected ? '' : 'text-slate-400'
-                                     }`}>{opt.icon}</span>
-                                     <span className="font-bold">{opt.label}</span>
-                                 </button>
-                             )
-                         })}
-                     </div>
-                 </div>
-             )}
-
-             <button
-                 onClick={handleQuickAdd}
-                 disabled={!qaAmount || !qaDesc}
-                 className={`w-full py-4 rounded-2xl font-bold text-lg text-white shadow-xl active:scale-95 transition-all flex items-center justify-center gap-2 ${
-                    !qaAmount || !qaDesc ? 'bg-slate-300 opacity-50 shadow-none' : 
-                    qaType === TransactionType.INCOME ? 'bg-cyan-500 hover:bg-cyan-600 shadow-cyan-200' :
-                    qaSplit === SplitType.MEO_PAID ? 'bg-cyan-600 hover:bg-cyan-700 shadow-cyan-200' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-200'
-                 }`}
-             >
-                 <span className="material-symbols-rounded text-2xl">check</span>
-                 {qaType === TransactionType.INCOME ? 'Lưu thu nhập' : (qaSplit === SplitType.MEO_PAID ? 'Xác nhận Mèo trả' : 'Lưu chi tiêu')}
-             </button>
-         </div>
-      </div>
-
-      {/* Accounts */}
-      <div>
-        <div className="flex justify-between items-center mb-4 px-1">
-            <h3 className="font-bold text-slate-800 text-lg">Ví của tôi</h3>
-            <button 
-                onClick={() => setShowTransfer(true)}
-                className="text-xs font-bold text-blue-600 bg-blue-50 active:bg-blue-100 px-4 py-2 rounded-full flex items-center gap-1 transition-all active:scale-95"
-            >
-                <span className="material-symbols-rounded text-lg">swap_horiz</span>
-                Chuyển tiền
-            </button>
-        </div>
-
-        {/* Tiết kiệm ăn Tết */}
-        <div className="bg-gradient-to-br from-pink-500 to-rose-600 rounded-3xl p-5 text-white shadow-lg shadow-pink-200 mb-4 relative overflow-hidden">
-            <div className="absolute -top-10 -right-10 w-40 h-40 bg-white opacity-10 rounded-full blur-2xl"></div>
-            <div className="flex justify-between items-center relative z-10">
-                <div className="flex-1 mr-4">
-                    <p className="text-pink-100 text-sm font-medium mb-1 flex items-center gap-1">
-                        <span className="material-symbols-rounded text-sm">celebration</span>
-                        Tiết kiệm ăn Tết
-                    </p>
-                    {isEditingTetSaving ? (
-                        <input
-                            type="text"
-                            inputMode="numeric"
-                            className="w-full text-3xl font-bold tracking-tight border-b border-white/50 focus:border-white focus:outline-none bg-transparent placeholder-white/50"
-                            value={tempTetSavingBalance}
-                            onChange={(e) => setTempTetSavingBalance(formatNumberInput(e.target.value))}
-                            autoFocus
-                            onBlur={() => {
-                                const raw = tempTetSavingBalance.replace(/\./g, '');
-                                const val = parseFloat(raw);
-                                if (!isNaN(val)) {
-                                    handleUpdateBalance(AccountType.TET_SAVING, val);
-                                }
-                                setIsEditingTetSaving(false);
-                            }}
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                    const raw = tempTetSavingBalance.replace(/\./g, '');
-                                    const val = parseFloat(raw);
-                                    if (!isNaN(val)) {
-                                        handleUpdateBalance(AccountType.TET_SAVING, val);
-                                    }
-                                    setIsEditingTetSaving(false);
-                                }
-                            }}
-                        />
-                    ) : (
-                        <h2 
-                            className="text-3xl font-bold tracking-tight cursor-pointer"
-                            onClick={() => {
-                                setTempTetSavingBalance(formatNumberInput((accounts.find(a => a.id === AccountType.TET_SAVING)?.balance || 0).toString()));
-                                setIsEditingTetSaving(true);
-                            }}
-                        >
-                            {formatCurrency(accounts.find(a => a.id === AccountType.TET_SAVING)?.balance || 0)}
-                        </h2>
-                    )}
-                    <div className="mt-3 bg-white/10 rounded-xl p-3 border border-white/10 flex gap-4">
-                        <div className="flex-1">
-                            <p className="text-[10px] text-pink-100 mb-0.5 uppercase tracking-wider font-medium">Thực tế</p>
-                            <p className="text-sm font-bold">
-                                {formatCurrency(accounts.find(a => a.id === AccountType.MB)?.balance || 0)}
-                            </p>
-                        </div>
-                        <div className="w-px bg-white/20"></div>
-                        <div className="flex-1">
-                            <p className="text-[10px] text-pink-100 mb-0.5 uppercase tracking-wider font-medium">Khả dụng</p>
-                            <p className="text-sm font-bold">
-                                {formatCurrency((accounts.find(a => a.id === AccountType.MB)?.balance || 0) - (accounts.find(a => a.id === AccountType.TET_SAVING)?.balance || 0))}
-                            </p>
-                        </div>
-                    </div>
-                </div>
+      <div className="space-y-5 pb-28 pt-2">
+        {/* Apple Wallet Style Hero Card */}
+        <div className="relative overflow-hidden rounded-[28px] bg-gradient-to-br from-[#1c1c1e] via-[#121214] to-[#000000] p-6 text-white shadow-[0_12px_32px_rgba(0,0,0,0.15)] border border-white/[0.08]">
+          <div className="absolute top-0 right-0 w-48 h-48 bg-gradient-to-bl from-white/[0.06] to-transparent rounded-full -mr-16 -mt-16 pointer-events-none blur-2xl"></div>
+          
+          <div className="relative z-10">
+            <div className="flex justify-between items-start mb-5">
+              <div>
+                <p className="text-[11px] font-semibold text-[#86868b] uppercase tracking-widest mb-1.5">Tổng tài sản</p>
+                <h1 className="text-3xl sm:text-4xl font-semibold tracking-tight text-white">{formatCurrency(totalBalance)}</h1>
+              </div>
+              <div className="flex items-center gap-2">
                 <button 
-                    onClick={() => {
-                        setTransferFrom(AccountType.MB);
-                        setTransferTo(AccountType.TET_SAVING);
-                        setShowTransfer(true);
-                    }}
-                    className="bg-white/20 hover:bg-white/30 active:scale-95 transition-all p-3 rounded-2xl border border-white/10 flex flex-col items-center justify-center gap-1 min-w-[80px]"
+                  onClick={() => setShowQRScanner(true)}
+                  className="h-10 px-3.5 rounded-full bg-white/[0.12] hover:bg-white/[0.2] border border-white/15 flex items-center gap-1.5 text-white active:scale-95 transition-all text-xs font-semibold backdrop-blur-md shadow-sm"
+                  title="Quét mã QR để chuyển tiền"
                 >
-                    <span className="material-symbols-rounded text-white block">add_card</span>
-                    <span className="text-[10px] font-bold">Gửi thêm</span>
+                  <span className="material-symbols-rounded text-lg">qr_code_scanner</span>
+                  <span>Quét QR</span>
                 </button>
+                <button 
+                  onClick={() => setShowBill(true)}
+                  className="w-10 h-10 rounded-full bg-white/[0.08] hover:bg-white/[0.15] border border-white/10 flex items-center justify-center text-white active:scale-95 transition-all"
+                  title="Xem hoá đơn quyết toán"
+                >
+                  <span className="material-symbols-rounded text-lg">receipt_long</span>
+                </button>
+              </div>
             </div>
+
+            {/* Mèo Debt / Credit Status Bar */}
+            <div className="bg-white/[0.06] backdrop-blur-md rounded-2xl p-3.5 border border-white/[0.08] flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${
+                  isCredit ? 'bg-[#34c759]/20 text-[#34c759]' : 'bg-[#ff9500]/20 text-[#ff9500]'
+                }`}>
+                  <span className="material-symbols-rounded text-base">{isCredit ? 'account_balance_wallet' : 'person'}</span>
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase font-semibold text-white/50 tracking-wider">
+                    {isCredit ? 'Mèo có dư' : 'Mèo đang nợ'}
+                  </p>
+                  <p className="text-sm font-semibold tracking-tight text-white truncate">
+                    {formatCurrency(Math.abs(meoDebt))}
+                  </p>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-1.5 shrink-0">
+                <button 
+                  onClick={handleMeoDeposit}
+                  className="px-3 py-1.5 rounded-full text-xs font-medium bg-white/10 hover:bg-white/20 active:scale-95 text-white transition-all flex items-center gap-1 border border-white/10"
+                >
+                  <span className="material-symbols-rounded text-sm">add</span>
+                  300k
+                </button>
+                <button 
+                  onClick={() => setShowBill(true)}
+                  className="px-3 py-1.5 rounded-full text-xs font-medium bg-[#0071e3] hover:bg-[#0077ed] active:scale-95 text-white transition-all shadow-sm"
+                >
+                  Chốt sổ
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-            {accounts.filter(acc => acc.id !== AccountType.TET_SAVING).map(acc => (
-                <AccountCard key={acc.id} account={acc} onUpdateBalance={handleUpdateBalance} />
-            ))}
-        </div>
-      </div>
-    </div>
-  );
-};
+        {/* Apple Monthly Activity Widget */}
+        <MonthlyStats transactions={transactions} />
 
-  const renderGold = () => {
-    const goldUnits = fromTotalPhan(goldState?.totalPhan || 0);
-    const goldBrands = goldState?.brands || GOLD_BRANDS;
+        {/* Apple Pay-style Quick Add Card with Smart Amount Suggestions */}
+        <div className="bg-white rounded-[28px] p-5 shadow-[0_4px_24px_rgba(0,0,0,0.04)] border border-black/[0.05]">
+          <div className="flex justify-between items-center mb-4">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#86868b]">Ghi chép giao dịch</p>
+            <span className="text-[11px] font-medium text-[#86868b]">{qaDate.toLocaleDateString('vi-VN')}</span>
+          </div>
 
-    // Filter gold transactions and sort by date ascending (oldest to newest)
-    const goldHistory = transactions
-        .filter(t => t.description?.toLowerCase().includes('vàng'))
-        .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+          {/* Segmented Control: Chi tiêu | Thu nhập */}
+          <div className="flex bg-[#f5f5f7] p-1 rounded-full mb-4 relative">
+            <button
+              onClick={() => setQaType(TransactionType.EXPENSE)}
+              className={`flex-1 py-2 rounded-full text-xs font-semibold transition-all relative z-10 flex items-center justify-center gap-1.5 ${
+                qaType === TransactionType.EXPENSE ? 'text-[#1d1d1f] bg-white shadow-sm' : 'text-[#86868b]'
+              }`}
+            >
+              <span className="material-symbols-rounded text-sm">arrow_upward</span>
+              Chi tiêu
+            </button>
+            <button
+              onClick={() => setQaType(TransactionType.INCOME)}
+              className={`flex-1 py-2 rounded-full text-xs font-semibold transition-all relative z-10 flex items-center justify-center gap-1.5 ${
+                qaType === TransactionType.INCOME ? 'text-[#34c759] bg-white shadow-sm' : 'text-[#86868b]'
+              }`}
+            >
+              <span className="material-symbols-rounded text-sm">arrow_downward</span>
+              Thu nhập
+            </button>
+          </div>
 
-    return (
-      <div className="pb-32">
-        <div className="bg-indigo-600 pt-12 pb-20 px-6 rounded-b-[40px] relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-white/10 rounded-full -mr-32 -mt-32 blur-3xl"></div>
-            <div className="absolute bottom-0 left-0 w-48 h-48 bg-indigo-400/20 rounded-full -ml-24 -mb-24 blur-2xl"></div>
-            
-            <div className="relative z-10">
-                <div className="flex justify-between items-center mb-6">
-                    <h1 className="text-2xl font-black text-white tracking-tight flex items-center gap-2">
-                        <span className="material-symbols-rounded">payments</span>
-                        Đầu tư Vàng
-                    </h1>
-                    <button 
-                        onClick={handleClearGoldHistory}
-                        className="p-2 bg-white/20 text-white rounded-full active:scale-95 transition-all"
-                        title="Xoá lịch sử vàng"
+          {/* Hero Amount Input */}
+          <div className="mb-2 text-center">
+            <div className="inline-flex items-baseline justify-center">
+              <input 
+                type="text"
+                inputMode="numeric"
+                value={qaAmount}
+                onChange={(e) => setQaAmount(formatNumberInput(e.target.value))}
+                placeholder="0"
+                className={`text-4xl sm:text-5xl font-semibold tracking-tight text-center outline-none bg-transparent placeholder-black/15 max-w-[280px] ${
+                  qaType === TransactionType.INCOME ? 'text-[#34c759]' : 'text-[#1d1d1f]'
+                }`}
+              />
+              <span className="text-sm font-semibold text-[#86868b] ml-1">₫</span>
+            </div>
+            {qaAmount && (
+              <p className="text-xs font-medium text-[#86868b] mt-0.5">
+                {formatCurrency(parseSmartAmount(qaAmount))}
+              </p>
+            )}
+          </div>
+
+          {/* Smart Amount Suggestions Chips */}
+          <div className="mb-5">
+            <p className="text-[10px] text-center font-semibold text-[#86868b] uppercase tracking-wider mb-1.5">
+              Gợi ý số tiền nhanh
+            </p>
+            <div className="flex items-center justify-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-1 flex-wrap">
+              {getAmountSuggestions(qaAmount).map((sugg) => (
+                <button
+                  key={sugg}
+                  type="button"
+                  onClick={() => setQaAmount(formatNumberInput(sugg.toString()))}
+                  className={`px-3 py-1 rounded-full text-xs font-semibold transition-all active:scale-95 border ${
+                    parseSmartAmount(qaAmount) === sugg
+                      ? 'bg-[#1d1d1f] text-white border-[#1d1d1f] shadow-sm'
+                      : 'bg-[#f5f5f7] hover:bg-[#e8e8ed] text-[#1d1d1f] border-black/[0.04]'
+                  }`}
+                >
+                  {formatCurrency(sugg)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Input Details */}
+          <div className="space-y-3 mb-5">
+            {/* Description Row */}
+            <div className="bg-[#f5f5f7] rounded-2xl px-4 py-3 flex items-center gap-2.5 border border-black/[0.03]">
+              <span className="material-symbols-rounded text-[#86868b] text-base">edit_note</span>
+              <input 
+                type="text" 
+                value={qaDesc}
+                onChange={(e) => setQaDesc(e.target.value)}
+                placeholder={qaType === TransactionType.INCOME ? "Nguồn thu nhập (Lương, thưởng...)" : "Nội dung chi tiêu (Cà phê, đi chợ...)"}
+                className="w-full text-sm font-medium text-[#1d1d1f] placeholder-[#86868b]/60 outline-none bg-transparent"
+              />
+            </div>
+
+            {/* Date Picker Row */}
+            <div className="bg-[#f5f5f7] rounded-2xl px-4 py-3 flex items-center gap-2.5 border border-black/[0.03]">
+              <span className="material-symbols-rounded text-[#86868b] text-base">calendar_today</span>
+              <DatePicker 
+                selected={qaDate} 
+                onChange={(date: Date | null) => date && setQaDate(date)} 
+                dateFormat="dd/MM/yyyy"
+                locale={vi}
+                formatWeekDay={formatShortWeekday}
+                className="w-full text-sm font-medium text-[#1d1d1f] outline-none bg-transparent cursor-pointer"
+                wrapperClassName="flex-1"
+              />
+            </div>
+
+            {/* Wallet Selection Capsules */}
+            <div>
+              <p className="text-[10px] font-semibold text-[#86868b] uppercase tracking-wider mb-2 px-1">Ví thanh toán</p>
+              <div className="grid grid-cols-3 gap-2">
+                {[AccountType.MB, AccountType.TCB, AccountType.CASH].map(type => {
+                  const acc = accounts.find(a => a.id === type);
+                  if (!acc) return null;
+                  const isSelected = qaAccount === acc.id;
+                  return (
+                    <button
+                      key={acc.id}
+                      onClick={() => setQaAccount(acc.id as AccountType)}
+                      className={`py-2 px-2.5 rounded-xl text-xs font-medium transition-all active:scale-[0.98] border text-center truncate ${
+                        isSelected 
+                          ? 'bg-[#1d1d1f] text-white border-[#1d1d1f] shadow-sm' 
+                          : 'bg-[#f5f5f7] text-[#1d1d1f] border-transparent hover:border-black/10'
+                      }`}
                     >
-                        <span className="material-symbols-rounded">delete_sweep</span>
+                      {acc.name}
                     </button>
-                </div>
-
-                <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-3xl p-6">
-                    <p className="text-indigo-100 text-xs font-bold uppercase tracking-widest mb-1 opacity-80">Tổng tài sản vàng</p>
-                    <div className="flex items-baseline gap-2">
-                        <h2 className="text-4xl font-black text-white tracking-tighter">
-                            {goldUnits.luong}L {goldUnits.chi}C {goldUnits.phan}P
-                        </h2>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div className="px-6 -mt-10 space-y-6 relative z-10">
-            {/* Brand Summary Cards */}
-            <div className="grid grid-cols-1 gap-4">
-                {goldState?.brandTotals && Object.entries(goldState.brandTotals).map(([brand, phan]) => {
-                    const phanNum = phan as number;
-                    if (phanNum <= 0) return null;
-                    const units = fromTotalPhan(phanNum);
-                    const moneySpent = (goldState.brandMoneySpent || {})[brand] || 0;
-                    
-                    return (
-                        <div key={brand} className="bg-white rounded-3xl p-5 shadow-xl shadow-slate-100 border border-slate-100 flex justify-between items-center">
-                            <div>
-                                <h4 className="font-black text-slate-800 text-lg mb-1">{brand}</h4>
-                                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                                    Vốn: <span className="text-indigo-600">{formatCurrency(moneySpent)}</span>
-                                </p>
-                            </div>
-                            <div className="text-right">
-                                <p className="text-xl font-black text-amber-500">
-                                    {units.luong}L {units.chi}C {units.phan}P
-                                </p>
-                                <p className="text-[10px] font-bold text-slate-300 uppercase">Số lượng hiện có</p>
-                            </div>
-                        </div>
-                    );
+                  );
                 })}
+              </div>
             </div>
 
-            {/* Action Section */}
-            <div className="bg-white rounded-[32px] p-6 shadow-xl shadow-slate-100 border border-slate-100">
-                <div className="flex p-1 bg-slate-100 rounded-2xl mb-6">
-                    <button 
-                        onClick={() => setShowGoldWithdraw(false)}
-                        className={`flex-1 py-3 rounded-xl font-bold text-sm transition-all ${!showGoldWithdraw ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}
-                    >
-                        Mua vàng
-                    </button>
-                    <button 
-                        onClick={() => setShowGoldWithdraw(true)}
-                        className={`flex-1 py-3 rounded-xl font-bold text-sm transition-all ${showGoldWithdraw ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500'}`}
-                    >
-                        Bán chốt lãi
-                    </button>
+            {/* Split Options - Only for Expense */}
+            {qaType === TransactionType.EXPENSE && (
+              <div className="pt-1">
+                <p className="text-[10px] font-semibold text-[#86868b] uppercase tracking-wider mb-2 px-1">Phân bổ chi phí</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {SPLIT_OPTIONS.map(opt => {
+                    const isSelected = qaSplit === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        onClick={() => setQaSplit(opt.id as SplitType)}
+                        className={`p-2.5 rounded-xl text-xs font-medium border text-left flex items-center gap-2 transition-all active:scale-[0.98] ${
+                          isSelected
+                            ? 'bg-[#0071e3]/10 border-[#0071e3] text-[#0071e3] font-semibold'
+                            : 'bg-[#f5f5f7] border-transparent text-[#1d1d1f] hover:border-black/10'
+                        }`}
+                      >
+                        <span className="material-symbols-rounded text-sm shrink-0">{opt.icon}</span>
+                        <span className="truncate">{opt.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
+              </div>
+            )}
+          </div>
 
-                {!showGoldWithdraw ? (
-                    <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-3">
-                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Thương hiệu</label>
-                                <input 
-                                    list="gold-brands-buy"
-                                    value={goldBuyBrand} 
-                                    onChange={(e) => setGoldBuyBrand(e.target.value)}
-                                    placeholder="Nhập hoặc chọn..."
-                                    className="w-full bg-transparent font-bold text-slate-700 outline-none"
-                                />
-                                <datalist id="gold-brands-buy">
-                                    {goldBrands.map(b => <option key={b} value={b} />)}
-                                </datalist>
-                            </div>
-                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Ngày mua</label>
-                                <DatePicker
-                                    selected={goldBuyDate}
-                                    onChange={(date: Date | null) => date && setGoldBuyDate(date)}
-                                    dateFormat="dd/MM/yyyy"
-                                    locale={vi}
-                                    className="w-full bg-transparent font-bold text-slate-700 outline-none"
-                                />
-                            </div>
-                        </div>
+          {/* Action Button */}
+          <button
+            onClick={handleQuickAdd}
+            disabled={!qaAmount || !qaDesc}
+            className={`w-full py-3.5 rounded-full font-medium text-sm text-white shadow-sm active:scale-[0.98] transition-all flex items-center justify-center gap-2 ${
+              !qaAmount || !qaDesc
+                ? 'bg-black/20 text-white/50 cursor-not-allowed'
+                : 'bg-[#1d1d1f] hover:bg-black text-white'
+            }`}
+          >
+            <span className="material-symbols-rounded text-base">check</span>
+            {qaType === TransactionType.INCOME ? 'Lưu thu nhập' : (qaSplit === SplitType.MEO_PAID ? 'Xác nhận Mèo trả' : 'Lưu chi tiêu')}
+          </button>
+        </div>
 
-                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                            <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Số tiền mua (VND)</label>
-                            <input
-                                type="text"
-                                inputMode="numeric"
-                                placeholder="0"
-                                value={goldBuyAmount}
-                                onChange={(e) => setGoldBuyAmount(formatNumberInput(e.target.value))}
-                                className="w-full bg-transparent text-xl font-bold text-slate-800 outline-none"
-                            />
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-3">
-                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block text-center">Lượng</label>
-                                <input
-                                    type="text"
-                                    inputMode="numeric"
-                                    placeholder="0"
-                                    value={goldBuyLuong}
-                                    onChange={(e) => setGoldBuyLuong(e.target.value.replace(/[^\d]/g, ''))}
-                                    className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
-                                />
-                            </div>
-                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block text-center">Chỉ</label>
-                                <input
-                                    type="text"
-                                    inputMode="numeric"
-                                    placeholder="0"
-                                    value={goldBuyChi}
-                                    onChange={(e) => setGoldBuyChi(e.target.value.replace(/[^\d]/g, ''))}
-                                    className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
-                                />
-                            </div>
-                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block text-center">Phân</label>
-                                <input
-                                    type="text"
-                                    inputMode="numeric"
-                                    placeholder="0"
-                                    value={goldBuyPhan}
-                                    onChange={(e) => setGoldBuyPhan(e.target.value.replace(/[^\d]/g, ''))}
-                                    className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="p-3 bg-amber-50 rounded-2xl border border-amber-100">
-                            <p className="text-[10px] text-amber-700 font-bold leading-relaxed">
-                                <span className="material-symbols-rounded text-xs align-middle mr-1">info</span>
-                                {goldBuyDate < new Date(2026, 2, 21) 
-                                    ? "Mua trước 21/03/2026: Không trừ vào Tiết kiệm ăn Tết & MB Bank." 
-                                    : "Mua từ 21/03/2026: Sẽ trừ vào Tiết kiệm ăn Tết & MB Bank."}
-                            </p>
-                        </div>
-
-                        <button
-                            onClick={handleBuyGold}
-                            className="w-full py-4 bg-indigo-600 text-white font-bold rounded-2xl shadow-lg shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-2"
-                        >
-                            <span className="material-symbols-rounded">add_circle</span>
-                            Xác nhận mua
-                        </button>
-                    </div>
-                ) : (
-                    <div className="space-y-4 animate-fade-in">
-                        <div className="grid grid-cols-1 gap-3">
-                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Thương hiệu bán</label>
-                                <select 
-                                    value={goldWithdrawBrand} 
-                                    onChange={(e) => setGoldWithdrawBrand(e.target.value)}
-                                    className="w-full bg-transparent font-bold text-slate-700 outline-none"
-                                >
-                                    {goldBrands.map(b => <option key={b} value={b}>{b}</option>)}
-                                </select>
-                            </div>
-                        </div>
-
-                        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                            <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Số tiền nhận được (VND)</label>
-                            <input
-                                type="text"
-                                inputMode="numeric"
-                                placeholder="0"
-                                value={goldWithdrawAmount}
-                                onChange={(e) => setGoldWithdrawAmount(formatNumberInput(e.target.value))}
-                                className="w-full bg-transparent text-xl font-bold text-slate-800 outline-none"
-                            />
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-3">
-                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block text-center">Lượng</label>
-                                <input
-                                    type="text"
-                                    inputMode="numeric"
-                                    placeholder="0"
-                                    value={goldWithdrawLuong}
-                                    onChange={(e) => setGoldWithdrawLuong(e.target.value.replace(/[^\d]/g, ''))}
-                                    className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
-                                />
-                            </div>
-                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block text-center">Chỉ</label>
-                                <input
-                                    type="text"
-                                    inputMode="numeric"
-                                    placeholder="0"
-                                    value={goldWithdrawChi}
-                                    onChange={(e) => setGoldWithdrawChi(e.target.value.replace(/[^\d]/g, ''))}
-                                    className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
-                                />
-                            </div>
-                            <div className="bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block text-center">Phân</label>
-                                <input
-                                    type="text"
-                                    inputMode="numeric"
-                                    placeholder="0"
-                                    value={goldWithdrawPhan}
-                                    onChange={(e) => setGoldWithdrawPhan(e.target.value.replace(/[^\d]/g, ''))}
-                                    className="w-full bg-transparent text-center font-bold text-slate-800 outline-none"
-                                />
-                            </div>
-                        </div>
-
-                        <button
-                            onClick={handleWithdrawGold}
-                            className="w-full py-4 bg-slate-800 text-white font-bold rounded-2xl shadow-lg shadow-slate-200 active:scale-95 transition-all flex items-center justify-center gap-2"
-                        >
-                            <span className="material-symbols-rounded">sell</span>
-                            Xác nhận bán chốt lãi
-                        </button>
-                    </div>
-                )}
+        {/* My Wallets & Cards Section - Clean 2x2 Grid of all active accounts */}
+        <div>
+          <div className="flex justify-between items-center mb-3.5 px-1">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-[#86868b]">Tài chính cá nhân</p>
+              <h3 className="text-base font-semibold text-[#1d1d1f]">Ví & Thẻ của tôi</h3>
             </div>
-
-            {/* Gold History Section */}
-            <div className="bg-white rounded-[32px] p-6 shadow-xl shadow-slate-100 border border-slate-100">
-                <h3 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-2">
-                    <span className="material-symbols-rounded text-indigo-600">history</span>
-                    Lịch sử đầu tư (Cũ → Mới)
-                </h3>
-                
-                <div className="space-y-4">
-                    {goldHistory.length === 0 ? (
-                        <p className="text-center text-slate-400 py-8 font-bold text-sm italic">Chưa có giao dịch vàng nào</p>
-                    ) : (
-                        goldHistory.map((t, idx) => (
-                            <div key={t.id} className="flex gap-4 items-start relative">
-                                {idx !== goldHistory.length - 1 && (
-                                    <div className="absolute left-[19px] top-10 bottom-[-16px] w-0.5 bg-slate-100"></div>
-                                )}
-                                <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 z-10 ${
-                                    t.type === TransactionType.EXPENSE ? 'bg-amber-50 text-amber-600' : 'bg-emerald-50 text-emerald-600'
-                                }`}>
-                                    <span className="material-symbols-rounded text-xl">
-                                        {t.type === TransactionType.EXPENSE ? 'add_shopping_cart' : 'sell'}
-                                    </span>
-                                </div>
-                                <div className="flex-1 pt-1">
-                                    <div className="flex justify-between items-start mb-0.5">
-                                        <p className="font-bold text-slate-800 text-sm leading-snug">{t.description}</p>
-                                        <p className={`font-black text-sm ${
-                                            t.type === TransactionType.EXPENSE ? 'text-rose-500' : 'text-emerald-500'
-                                        }`}>
-                                            {t.type === TransactionType.EXPENSE ? '-' : '+'}{formatCurrency(t.amount)}
-                                        </p>
-                                    </div>
-                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                                        {new Date(t.date).toLocaleDateString('vi-VN')}
-                                    </p>
-                                </div>
-                            </div>
-                        ))
-                    )}
-                </div>
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => setShowQRScanner(true)}
+                className="text-xs font-semibold text-[#0071e3] bg-[#0071e3]/10 hover:bg-[#0071e3]/15 active:scale-95 px-3 py-1.5 rounded-full flex items-center gap-1 transition-all"
+              >
+                <span className="material-symbols-rounded text-base">qr_code_scanner</span>
+                Quét QR
+              </button>
+              <button 
+                onClick={() => setShowTransfer(true)}
+                className="text-xs font-medium text-[#1d1d1f] bg-white border border-black/[0.08] active:bg-[#f5f5f7] px-3 py-1.5 rounded-full flex items-center gap-1 transition-all active:scale-95 shadow-sm"
+              >
+                <span className="material-symbols-rounded text-base">swap_horiz</span>
+                Chuyển ví
+              </button>
             </div>
+          </div>
+
+          {/* 4 Clean Apple Wallet Cards */}
+          <div className="grid grid-cols-2 gap-3">
+            {visibleAccounts.map(acc => (
+              <AccountCard key={acc.id} account={acc} onUpdateBalance={handleUpdateBalance} />
+            ))}
+          </div>
         </div>
       </div>
     );
   };
 
+  // HISTORY SCREEN (Apple Wallet Feed)
   const renderHistory = () => {
-      const filteredTransactions = transactions.filter(t => {
-          if (historyFilter === 'BILL') {
-              return t.type === TransactionType.SETTLEMENT;
-          }
-          if (historyFilter === 'ME') {
-              return (
-                  (t.splitType === SplitType.ME_ONLY || t.splitType === SplitType.SHARED || t.type === TransactionType.TRANSFER || t.type === TransactionType.INCOME) && 
-                  t.type !== TransactionType.SETTLEMENT
-              );
-          }
-          if (historyFilter === 'MEO') {
-              return (
-                  (t.splitType === SplitType.SHARED || t.splitType === SplitType.MEO_ONLY || t.splitType === SplitType.MEO_PAID) 
-                  && t.type !== TransactionType.SETTLEMENT
-              );
-          }
-          return true;
-      });
+    const filteredTransactions = transactions.filter(t => {
+      if (historyFilter === 'BILL') {
+        return t.type === TransactionType.SETTLEMENT;
+      }
+      if (historyFilter === 'ME') {
+        return (
+          (t.splitType === SplitType.ME_ONLY || t.splitType === SplitType.SHARED || t.type === TransactionType.TRANSFER || t.type === TransactionType.INCOME) && 
+          t.type !== TransactionType.SETTLEMENT
+        );
+      }
+      if (historyFilter === 'MEO') {
+        return (
+          (t.splitType === SplitType.SHARED || t.splitType === SplitType.MEO_ONLY || t.splitType === SplitType.MEO_PAID) && 
+          t.type !== TransactionType.SETTLEMENT
+        );
+      }
+      return true;
+    });
 
-      const groupedTxs = groupTransactionsByDate(filteredTransactions);
-      const sortedDates = Object.keys(groupedTxs).sort((a, b) => {
-          if (a === 'Hôm nay') return -1;
-          if (b === 'Hôm nay') return 1;
-          if (a === 'Hôm qua') return -1;
-          if (b === 'Hôm qua') return 1;
-          return new Date(b.split('/').reverse().join('-')).getTime() - new Date(a.split('/').reverse().join('-')).getTime();
-      });
+    const groupedTxs = groupTransactionsByDate(filteredTransactions);
+    const sortedDates = Object.keys(groupedTxs).sort((a, b) => {
+      if (a === 'Hôm nay') return -1;
+      if (b === 'Hôm nay') return 1;
+      if (a === 'Hôm qua') return -1;
+      if (b === 'Hôm qua') return 1;
+      return new Date(b.split('/').reverse().join('-')).getTime() - new Date(a.split('/').reverse().join('-')).getTime();
+    });
 
-      const totalIn = filteredTransactions
-        .filter(t => t.type === TransactionType.INCOME || t.splitType === SplitType.MEO_PAID || t.type === TransactionType.SETTLEMENT)
-        .reduce((sum, t) => sum + (t.splitType === SplitType.SHARED ? t.amount / 2 : t.amount), 0);
-      
-      const totalOut = filteredTransactions
-        .filter(t => t.type === TransactionType.EXPENSE && t.splitType !== SplitType.MEO_PAID)
-        .reduce((sum, t) => sum + (t.splitType === SplitType.SHARED ? t.amount / 2 : t.amount), 0);
+    const totalIn = filteredTransactions
+      .filter(t => t.type === TransactionType.INCOME || t.splitType === SplitType.MEO_PAID || t.type === TransactionType.SETTLEMENT)
+      .reduce((sum, t) => sum + (t.splitType === SplitType.SHARED ? t.amount / 2 : t.amount), 0);
+    
+    const totalOut = filteredTransactions
+      .filter(t => t.type === TransactionType.EXPENSE && t.splitType !== SplitType.MEO_PAID)
+      .reduce((sum, t) => sum + (t.splitType === SplitType.SHARED ? t.amount / 2 : t.amount), 0);
 
-      return (
-        <div className="pb-32 animate-fade-in pt-4">
-            <div className="flex items-center justify-between mb-8 px-1">
-                <div>
-                    <h2 className="text-2xl font-black text-slate-800 tracking-tight">Lịch sử</h2>
-                    <p className="text-sm font-bold text-slate-400 uppercase tracking-wider">Dòng tiền & Đối soát</p>
-                </div>
-                
-                <div className="flex bg-slate-100 p-1 rounded-2xl relative">
-                    {['MEO', 'ME', 'BILL'].map((filter) => (
-                        <button 
-                            key={filter}
-                            onClick={() => setHistoryFilter(filter as any)}
-                            className={`px-4 py-2 rounded-xl text-xs font-black transition-all relative z-10 ${
-                                historyFilter === filter ? 'text-indigo-600' : 'text-slate-400'
-                            }`}
-                        >
-                            {filter === 'MEO' ? 'Mèo' : filter === 'ME' ? 'Tôi' : 'Bill'}
-                            {historyFilter === filter && (
-                                <motion.div 
-                                    layoutId="history-filter-bg"
-                                    className="absolute inset-0 bg-white shadow-sm rounded-xl -z-10 border border-slate-200/50"
-                                />
-                            )}
-                        </button>
-                    ))}
-                </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-4 mb-8">
-                <div className="bg-emerald-50/50 border border-emerald-100 p-4 rounded-[24px]">
-                    <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest mb-1">Tổng thu</p>
-                    <p className="text-lg font-black text-emerald-700">{formatShortCurrency(totalIn)}</p>
-                </div>
-                <div className="bg-rose-50/50 border border-rose-100 p-4 rounded-[24px]">
-                    <p className="text-[10px] font-black text-rose-600 uppercase tracking-widest mb-1">Tổng chi</p>
-                    <p className="text-lg font-black text-rose-700">{formatShortCurrency(totalOut)}</p>
-                </div>
-            </div>
-            
-            {sortedDates.length === 0 ? (
-                 <div className="flex flex-col items-center justify-center py-24 text-center">
-                    <div className="w-24 h-24 bg-slate-50 text-slate-200 rounded-[32px] flex items-center justify-center mb-6 border border-slate-100">
-                        <span className="material-symbols-rounded text-5xl">
-                            {historyFilter === 'BILL' ? 'receipt_long' : 'history_toggle_off'}
-                        </span>
-                    </div>
-                    <h3 className="text-lg font-bold text-slate-800 mb-2">Trống trơn</h3>
-                    <p className="text-slate-400 text-sm max-w-[200px]">Chưa có giao dịch nào hiển thị ở đây cả</p>
-                </div>
-            ) : (
-                <div className="space-y-10">
-                    {sortedDates.map(date => (
-                        <div key={date} className="relative">
-                            <div className="flex items-center gap-3 mb-4 px-1">
-                                <div className="h-[1px] flex-1 bg-slate-100"></div>
-                                <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{date}</h4>
-                                <div className="h-[1px] flex-1 bg-slate-100"></div>
-                            </div>
-
-                            <div className="bg-white rounded-[32px] shadow-sm border border-slate-100 overflow-hidden divide-y divide-slate-50">
-                                {groupedTxs[date].map((t) => {
-                                    const isMeoPaid = t.splitType === SplitType.MEO_PAID;
-                                    const isTransfer = t.type === TransactionType.TRANSFER;
-                                    const isSettlement = t.type === TransactionType.SETTLEMENT;
-                                    const isShared = t.splitType === SplitType.SHARED;
-                                    const isIncome = t.type === TransactionType.INCOME;
-                                    const displayAmount = isShared ? t.amount / 2 : t.amount;
-
-                                    return (
-                                        <div key={t.id} className="p-4 flex items-center gap-4 active:bg-slate-50/80 transition-colors group">
-                                            <div 
-                                                onClick={() => isSettlement && handleViewBill(t)}
-                                                className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border-2 ${
-                                                isSettlement ? 'bg-purple-50 text-purple-600 border-purple-100' :
-                                                isMeoPaid || (isIncome && isMeoPaid) ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
-                                                isIncome ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
-                                                isTransfer ? 'bg-indigo-50 text-indigo-600 border-indigo-100' :
-                                                'bg-slate-50 text-slate-500 border-slate-100'
-                                            }`}>
-                                                <span className="material-symbols-rounded text-xl">
-                                                    {isSettlement ? 'receipt' : isMeoPaid ? 'price_check' : isIncome ? 'trending_up' : isTransfer ? 'swap_horiz' : 'shopping_bag'}
-                                                </span>
-                                            </div>
-
-                                            <div className="flex-1 min-w-0" onClick={() => isSettlement && handleViewBill(t)}>
-                                                <div className="flex items-center gap-1.5 mb-1">
-                                                    <h5 className="font-extrabold text-slate-800 text-sm truncate">{t.description}</h5>
-                                                    {t.isSettled && !isSettlement && <span className="material-symbols-rounded text-[14px] text-indigo-400">verified</span>}
-                                                </div>
-                                                
-                                                <div className="flex items-center flex-wrap gap-1.5">
-                                                     <div className="flex items-center gap-1 bg-slate-100/80 px-2 py-0.5 rounded-lg">
-                                                         <span className="material-symbols-rounded text-[12px] text-slate-400">account_balance_wallet</span>
-                                                         <span className="text-[10px] text-slate-500 font-bold truncate max-w-[70px]">
-                                                            {accounts.find(a => a.id === t.accountId)?.name}
-                                                         </span>
-                                                     </div>
-
-                                                     {isTransfer && (
-                                                         <div className="flex items-center gap-1 bg-indigo-50 px-2 py-0.5 rounded-lg text-indigo-600">
-                                                             <span className="material-symbols-rounded text-[14px]">arrow_forward</span>
-                                                             <span className="text-[10px] font-bold truncate max-w-[70px]">
-                                                                {accounts.find(a => a.id === t.toAccountId)?.name}
-                                                             </span>
-                                                         </div>
-                                                     )}
-
-                                                     {!isTransfer && !isSettlement && !isIncome && (
-                                                         <span className={`text-[10px] px-2 py-0.5 rounded-lg font-black uppercase tracking-tight ${
-                                                             t.splitType === 'ME_ONLY' ? 'bg-slate-100 text-slate-400' :
-                                                             isMeoPaid ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-600'
-                                                         }`}>
-                                                             {SPLIT_OPTIONS.find(o => o.id === t.splitType)?.label}
-                                                         </span>
-                                                     )}
-
-                                                     {isIncome && !isMeoPaid && (
-                                                        <span className="text-[10px] px-2 py-0.5 rounded-lg font-black uppercase tracking-tight bg-emerald-100 text-emerald-700">
-                                                            Thu nhập
-                                                        </span>
-                                                     )}
-                                                </div>
-                                            </div>
-
-                                            <div className="flex flex-col items-end gap-2 shrink-0">
-                                                <p className={`font-black text-sm whitespace-nowrap ${
-                                                    isSettlement ? 'text-purple-600' : isMeoPaid || isIncome ? 'text-emerald-600' : isTransfer ? 'text-slate-600' : 'text-slate-900'
-                                                }`}>
-                                                    {isMeoPaid || isSettlement || isIncome ? '+' : isTransfer ? '' : '-'}{formatShortCurrency(displayAmount)}
-                                                </p>
-                                                
-                                                <div className="flex items-center gap-0.5">
-                                                    {!t.isSettled || t.type === TransactionType.SETTLEMENT || (t.type === TransactionType.INCOME && t.splitType === SplitType.MEO_PAID) ? (
-                                                        <>
-                                                            <button onClick={(e) => { e.stopPropagation(); handleEditTransaction(t); }} className="w-7 h-7 rounded-full flex items-center justify-center text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 transition-all active:scale-90">
-                                                                <span className="material-symbols-rounded text-lg">edit_square</span>
-                                                            </button>
-                                                            <button onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(t.id); }} className="w-7 h-7 rounded-full flex items-center justify-center text-slate-300 hover:text-rose-600 hover:bg-rose-50 transition-all active:scale-90">
-                                                                <span className="material-symbols-rounded text-lg">delete</span>
-                                                            </button>
-                                                        </>
-                                                    ) : (
-                                                        <div className="w-7 h-7 flex items-center justify-center text-slate-200" title="Đã đối soát">
-                                                            <span className="material-symbols-rounded text-base">lock</span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    ))}
-                </div>
-            )}
+    return (
+      <div className="pb-28 pt-2 space-y-5">
+        {/* Header & Segment Filter */}
+        <div className="flex items-center justify-between px-1">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#86868b]">Lịch sử giao dịch</p>
+            <h2 className="text-2xl font-semibold tracking-tight text-[#1d1d1f]">Dòng tiền</h2>
+          </div>
+          
+          <div className="flex bg-[#e5e5ea] p-1 rounded-full">
+            {(['MEO', 'ME', 'BILL'] as const).map((filter) => (
+              <button 
+                key={filter}
+                onClick={() => setHistoryFilter(filter)}
+                className={`px-3 py-1 rounded-full text-xs font-semibold transition-all ${
+                  historyFilter === filter 
+                    ? 'bg-white text-[#1d1d1f] shadow-sm' 
+                    : 'text-[#86868b] hover:text-[#1d1d1f]'
+                }`}
+              >
+                {filter === 'MEO' ? 'Mèo' : filter === 'ME' ? 'Tôi' : 'Hoá đơn'}
+              </button>
+            ))}
+          </div>
         </div>
-      );
-  };
 
-  const renderShopInventory = () => {
-      const normalizeProductName = (name: any) => String(name || '').trim().toLowerCase().replace(/\s+/g, ' ');
-      const invSearchText = invSearch.trim().toLowerCase();
-      
-      const filteredProducts = products
-          .filter(p => p.shopId === activeShop)
-          .filter(p => !invSearchText || normalizeProductName(p.name).includes(invSearchText));
+        {/* Minimalist Summary Pills */}
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-white p-4 rounded-2xl border border-black/[0.05] shadow-[0_2px_12px_rgba(0,0,0,0.02)]">
+            <div className="flex items-center gap-1.5 mb-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#34c759]"></span>
+              <p className="text-[11px] font-semibold text-[#86868b] uppercase tracking-wide">Tổng thu</p>
+            </div>
+            <p className="text-lg font-semibold text-[#1d1d1f]">{formatShortCurrency(totalIn)}</p>
+          </div>
+          <div className="bg-white p-4 rounded-2xl border border-black/[0.05] shadow-[0_2px_12px_rgba(0,0,0,0.02)]">
+            <div className="flex items-center gap-1.5 mb-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#ff3b30]"></span>
+              <p className="text-[11px] font-semibold text-[#86868b] uppercase tracking-wide">Tổng chi</p>
+            </div>
+            <p className="text-lg font-semibold text-[#1d1d1f]">{formatShortCurrency(totalOut)}</p>
+          </div>
+        </div>
+        
+        {/* Transaction Grouped List */}
+        {sortedDates.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <div className="w-16 h-16 rounded-full bg-black/[0.04] flex items-center justify-center text-[#86868b] mb-3">
+              <span className="material-symbols-rounded text-2xl">receipt_long</span>
+            </div>
+            <p className="text-sm font-semibold text-[#1d1d1f]">Không có giao dịch</p>
+            <p className="text-xs text-[#86868b] mt-1">Các giao dịch phát sinh sẽ hiển thị tại đây</p>
+          </div>
+        ) : (
+          <div className="space-y-5">
+            {sortedDates.map(date => (
+              <div key={date}>
+                <p className="text-[11px] font-semibold text-[#86868b] uppercase tracking-wider mb-2 px-2">
+                  {date}
+                </p>
 
-      const filteredCombos = combos
-          .filter(c => c.shopId === activeShop)
-          .filter(c => !invSearchText || normalizeProductName(c.name).includes(invSearchText));
-      
-      const grouped = new Map<string, any>();
-      for (const p of filteredProducts) {
-          const key = normalizeProductName(p.name) || String(p.id);
-          const displayName = String(p.name || '').trim() || 'Sản phẩm';
-          if (!grouped.has(key)) {
-              grouped.set(key, {
-                  key,
-                  name: displayName,
-                  products: [],
-                  totalStock: 0,
-                  minOriginalPrice: Number(p.originalPrice) || 0,
-                  maxOriginalPrice: Number(p.originalPrice) || 0,
-                  minSellingPrice: Number(p.sellingPrice) || 0,
-                  maxSellingPrice: Number(p.sellingPrice) || 0,
-                  lastImportDate: p.importDate
-              });
-          }
-          const g = grouped.get(key);
-          g.products.push(p);
-          g.totalStock += Number(p.stock) || 0;
-          g.minOriginalPrice = Math.min(g.minOriginalPrice, Number(p.originalPrice) || 0);
-          g.maxOriginalPrice = Math.max(g.maxOriginalPrice, Number(p.originalPrice) || 0);
-          g.minSellingPrice = Math.min(g.minSellingPrice, Number(p.sellingPrice) || 0);
-          g.maxSellingPrice = Math.max(g.maxSellingPrice, Number(p.sellingPrice) || 0);
-          if (p.importDate && (!g.lastImportDate || new Date(p.importDate).getTime() > new Date(g.lastImportDate).getTime())) {
-              g.lastImportDate = p.importDate;
-          }
-      }
-      
-      const groups = Array.from(grouped.values())
-          .sort((a, b) => {
-              if (a.totalStock > 0 && b.totalStock <= 0) return -1;
-              if (a.totalStock <= 0 && b.totalStock > 0) return 1;
-              return (Number(a.totalStock) - Number(b.totalStock)) || String(a.name).localeCompare(String(b.name), 'vi');
-          });
-      
-      const handleAddProduct = async () => {
-          if (!invForm.name || !invForm.originalPrice || !invForm.sellingPrice) return alert('Vui lòng nhập đủ thông tin');
-          const newProd = {
-              id: Date.now().toString(),
-              shopId: activeShop,
-              name: invForm.name,
-              originalPrice: parseSmartAmount(invForm.originalPrice),
-              sellingPrice: parseSmartAmount(invForm.sellingPrice),
-              stock: parseInt(invForm.stock) || 0,
-              importDate: invForm.date.toISOString()
-          };
-          
-          try {
-              await supabaseService.addShopProduct(newProd);
-              
-              const totalCost = newProd.originalPrice * newProd.stock;
-              if (totalCost > 0) {
-                const newFinance = {
-                    id: Date.now().toString(),
-                    shopId: activeShop,
-                    type: 'EXPENSE',
-                    amount: totalCost,
-                    description: `Nhập hàng ${activeShop.toUpperCase()}: ${newProd.name} (SL: ${newProd.stock})`,
-                    category: 'Chi phí nhập hàng',
-                    date: newProd.importDate
-                };
-                await supabaseService.addShopFinance(newFinance);
-                setShopFinances(prev => [newFinance, ...prev]);
-                const stockMove = {
-                    id: Date.now().toString() + '_in',
-                    shopId: activeShop,
-                    productId: newProd.id,
-                    type: 'IN',
-                    qty: newProd.stock,
-                    unitCost: newProd.originalPrice,
-                    sellingPrice: 0,
-                    reason: 'import',
-                    refId: newFinance.id,
-                    date: newProd.importDate
-                };
-                await supabaseService.addShopStockMove(stockMove);
-              }
-              
-              setProducts([newProd, ...products]);
-              setInvForm({ name: '', originalPrice: '', sellingPrice: '', stock: '1', date: new Date(), accountId: AccountType.MB });
-          } catch (error) {
-              console.error("Error adding product:", error);
-              alert("Lỗi khi thêm sản phẩm");
-          }
-      };
+                <div className="bg-white rounded-2xl shadow-[0_2px_16px_rgba(0,0,0,0.02)] border border-black/[0.05] divide-y divide-black/[0.04] overflow-hidden">
+                  {groupedTxs[date].map((t) => {
+                    const isMeoPaid = t.splitType === SplitType.MEO_PAID;
+                    const isTransfer = t.type === TransactionType.TRANSFER;
+                    const isSettlement = t.type === TransactionType.SETTLEMENT;
+                    const isShared = t.splitType === SplitType.SHARED;
+                    const isIncome = t.type === TransactionType.INCOME;
+                    const displayAmount = isShared ? t.amount / 2 : t.amount;
 
-      const handleAddCombo = async () => {
-          if (!comboForm.name || !comboForm.price) return alert('Vui lòng nhập đủ tên và giá combo');
-          if (comboForm.items.some(i => !i.productId || !i.qty)) return alert('Vui lòng chọn sản phẩm và số lượng cho combo');
-          
-          setIsLoading(true);
-          const pQty = parseInt(comboForm.packQty) || 1;
-          if (pQty <= 0) {
-              setIsLoading(false);
-              return alert('Số lượng đóng gói phải lớn hơn 0');
-          }
+                    return (
+                      <div key={t.id} className="p-3.5 flex items-center gap-3 hover:bg-black/[0.01] transition-colors">
+                        <div 
+                          onClick={() => isSettlement && handleViewBill(t)}
+                          className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                            isSettlement ? 'bg-[#5856d6]/10 text-[#5856d6]' :
+                            isMeoPaid || isIncome ? 'bg-[#34c759]/10 text-[#34c759]' :
+                            isTransfer ? 'bg-[#0071e3]/10 text-[#0071e3]' :
+                            'bg-black/[0.04] text-[#1d1d1f]'
+                          } ${isSettlement ? 'cursor-pointer' : ''}`}
+                        >
+                          <span className="material-symbols-rounded text-lg">
+                            {isSettlement ? 'receipt' : isMeoPaid ? 'price_check' : isIncome ? 'trending_up' : isTransfer ? 'swap_horiz' : 'shopping_bag'}
+                          </span>
+                        </div>
 
-          // Check stock and calculate cost
-          let totalCostPerUnit = 0;
-          const updates = [];
-          
-          for (const item of comboForm.items) {
-              const p = products.find(pp => pp.id === item.productId);
-              if (!p) {
-                  setIsLoading(false);
-                  return alert('Không tìm thấy sản phẩm thành phần');
-              }
-              const needed = (parseInt(item.qty) || 1) * pQty;
-              
-              const pName = String(p.name || '').trim().toLowerCase();
-              const lots = products.filter(pp => String(pp.name || '').trim().toLowerCase() === pName && pp.shopId === activeShop && pp.stock > 0)
-                                   .sort((a, b) => new Date(a.importDate || Date.now()).getTime() - new Date(b.importDate || Date.now()).getTime());
-              
-              const totalAvailable = lots.reduce((acc, curr) => acc + curr.stock, 0);
-              
-              if (totalAvailable < needed) {
-                  setIsLoading(false);
-                  return alert(`Sản phẩm [${p.name}] không đủ tồn kho trong các lô (Cần ${needed}, Hiện có tổng ${totalAvailable})`);
-              }
-              
-              let remaining = needed;
-              let costForThisItem = 0;
-              
-              for (const lot of lots) {
-                  if (remaining <= 0) break;
-                  const deduct = Math.min(lot.stock, remaining);
-                  remaining -= deduct;
-                  costForThisItem += (Number(lot.originalPrice) || 0) * deduct;
-                  updates.push({ id: lot.id, oldStock: lot.stock, used: deduct, name: lot.name });
-              }
-              
-              if (remaining > 0) {
-                  setIsLoading(false);
-                  return alert(`Lỗi: Không thể phân bổ tồn kho. Lô cho [${p.name}] có thể đã bị thay đổi.`);
-              }
-              
-              totalCostPerUnit += costForThisItem / pQty;
-          }
-
-          const existingCombo = combos.find(c => String(c.name || '').trim().toLowerCase() === String(comboForm.name || '').trim().toLowerCase() && c.shopId === activeShop);
-
-          try {
-              if (existingCombo) {
-                  // Incremental packaging for existing combo
-                  const newStock = (existingCombo.stock || 0) + pQty;
-                  const finalCost = isNaN(totalCostPerUnit) ? (existingCombo.cost || 0) : totalCostPerUnit;
-                  
-                  await supabaseService.updateShopComboStock(existingCombo.id, newStock);
-                  
-                  // Update products stock
-                  for (const u of updates) {
-                      await supabaseService.updateShopProductStock(u.id, u.oldStock - u.used);
-                      await supabaseService.addShopStockMove({
-                          id: Date.now().toString() + '_cb_' + u.id + '_' + Math.random().toString(36).substr(2, 5),
-                          shopId: activeShop,
-                          productId: u.id,
-                          type: 'OUT',
-                          qty: u.used,
-                          reason: 'combo_pack',
-                          date: new Date().toISOString()
-                      });
-                  }
-
-                  setCombos(combos.map(c => c.id === existingCombo.id ? { ...c, stock: newStock, cost: finalCost } : c));
-                  setProducts(products.map(p => {
-                      const u = updates.find(uu => uu.id === p.id);
-                      return u ? { ...p, stock: u.oldStock - u.used } : p;
-                  }));
-
-                  alert(`Đã đóng gói thêm ${pQty} combo "${existingCombo.name}" thành công!`);
-              } else {
-                  // Create new combo
-                  const newComboPrice = parseSmartAmount(comboForm.price);
-                  const newComboCost = isNaN(totalCostPerUnit) ? 0 : totalCostPerUnit;
-                  
-                  const newCombo = {
-                      id: 'combo_' + Date.now().toString() + '_' + Math.random().toString(36).substr(2, 5),
-                      shopId: activeShop,
-                      name: comboForm.name,
-                      price: newComboPrice,
-                      cost: newComboCost,
-                      stock: pQty,
-                      description: comboForm.description,
-                      items: comboForm.items.map(i => ({ productId: i.productId, qty: parseInt(i.qty) || 1 })),
-                      createdAt: new Date().toISOString()
-                  };
-
-                  await supabaseService.addShopCombo(newCombo);
-                  
-                  // Update products stock
-                  for (const u of updates) {
-                      await supabaseService.updateShopProductStock(u.id, u.oldStock - u.used);
-                      await supabaseService.addShopStockMove({
-                          id: Date.now().toString() + '_cbnew_' + u.id + '_' + Math.random().toString(36).substr(2, 5),
-                          shopId: activeShop,
-                          productId: u.id,
-                          type: 'OUT',
-                          qty: u.used,
-                          reason: 'combo_pack',
-                          date: new Date().toISOString()
-                      });
-                  }
-
-                  setCombos([newCombo, ...combos]);
-                  setProducts(products.map(p => {
-                      const u = updates.find(uu => uu.id === p.id);
-                      return u ? { ...p, stock: u.oldStock - u.used } : p;
-                  }));
-
-                  alert(`Combo mới "${newCombo.name}" đã được tạo và đóng gói ${pQty} đơn vị thành công!`);
-              }
-
-              setComboForm({ name: '', price: '', description: '', packQty: '1', items: [{ productId: '', qty: '1' }] });
-              setShowComboCreator(false);
-          } catch (error: any) {
-              console.error("Error adding/packaging combo:", error);
-              if (error?.code === '42P01') {
-                  alert("Bảng 'shop_combos' chưa được tạo trên Supabase!\n\nVui lòng vào Supabase SQL Editor và chạy lệnh sau:\n\nCREATE TABLE shop_combos (\n  id TEXT PRIMARY KEY,\n  shop_id TEXT,\n  name TEXT,\n  price NUMERIC,\n  cost NUMERIC,\n  stock INT,\n  description TEXT,\n  items JSONB,\n  created_at TIMESTAMPTZ\n);");
-              } else if (error?.code === '42501') {
-                  alert("Lỗi bảo mật (RLS) trên Supabase!\n\nBảng 'shop_combos' hoặc 'shop_stock_moves' đang chặn quyền ghi dữ liệu. Vui lòng chạy lệnh này trong Supabase SQL Editor:\n\nCREATE POLICY \"Enable all\" ON shop_combos FOR ALL USING (true) WITH CHECK (true);\nCREATE POLICY \"Enable all\" ON shop_stock_moves FOR ALL USING (true) WITH CHECK (true);");
-              } else if (error?.code === '23514') {
-                  alert("Lỗi dữ liệu (Check Constraint)!\n\nGiá trị nhập vào không hợp lệ với quy định của bảng. Vui lòng chạy lệnh này trong Supabase SQL Editor để mở rộng giới hạn:\n\nALTER TABLE shop_stock_moves DROP CONSTRAINT IF EXISTS shop_stock_moves_reason_check;");
-              } else {
-                  alert("Lỗi khi thực hiện: " + (error?.message || error?.details || JSON.stringify(error)));
-              }
-          } finally {
-              setIsLoading(false);
-          }
-      };
-
-      return (
-          <div className="space-y-6 animate-fade-in pb-32">
-              <div className="flex bg-slate-100 p-1 rounded-xl relative">
-                   <div className={`absolute top-1 bottom-1 w-[calc(50%-4px)] bg-white rounded-lg shadow-sm transition-all duration-300 ease-spring ${
-                       invTab === 'combos' ? 'left-[calc(50%+2px)]' : 'left-1'
-                   }`}></div>
-                   <button onClick={() => setInvTab('products')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all relative z-10 ${invTab === 'products' ? 'text-indigo-600' : 'text-slate-400'}`}>Sản phẩm</button>
-                   <button onClick={() => setInvTab('combos')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all relative z-10 ${invTab === 'combos' ? 'text-indigo-600' : 'text-slate-400'}`}>Combo</button>
-              </div>
-
-              {invTab === 'products' ? (
-                  <div className="bg-white p-5 sm:p-6 rounded-[32px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50">
-                      <div className="flex items-center gap-2 mb-5">
-                          <div className="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-500">
-                              <span className="material-symbols-rounded text-[18px]">add_box</span>
+                        <div className="flex-1 min-w-0" onClick={() => isSettlement && handleViewBill(t)}>
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            <h5 className="font-semibold text-xs text-[#1d1d1f] truncate">{t.description}</h5>
+                            {t.isSettled && !isSettlement && (
+                              <span className="material-symbols-rounded text-xs text-[#0071e3]" title="Đã quyết toán">verified</span>
+                            )}
                           </div>
-                          <h3 className="font-extrabold text-lg text-slate-800">Thêm hàng mới</h3>
-                      </div>
-                      <div className="space-y-4">
-                          <input type="text" placeholder="Tên sản phẩm" value={invForm.name} onChange={e => setInvForm({...invForm, name: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              <input type="text" placeholder="Giá gốc nhập/sản xuất" value={invForm.originalPrice} onChange={e => setInvForm({...invForm, originalPrice: formatNumberInput(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
-                              <input type="text" placeholder="Giá bán niêm yết" value={invForm.sellingPrice} onChange={e => setInvForm({...invForm, sellingPrice: formatNumberInput(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
+                          
+                          <div className="flex items-center gap-1.5 text-[10px] text-[#86868b]">
+                            <span>{accounts.find(a => a.id === t.accountId)?.name}</span>
+                            {isTransfer && t.toAccountId && (
+                              <span>→ {accounts.find(a => a.id === t.toAccountId)?.name}</span>
+                            )}
+                            {!isTransfer && !isSettlement && !isIncome && (
+                              <>
+                                <span>·</span>
+                                <span>{SPLIT_OPTIONS.find(o => o.id === t.splitType)?.label}</span>
+                              </>
+                            )}
                           </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              <input type="number" placeholder="Số lượng nhập" value={invForm.stock} onChange={e => setInvForm({...invForm, stock: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
-                              <div className="relative">
-                                  <select 
-                                      value={invForm.accountId} 
-                                      onChange={e => setInvForm({...invForm, accountId: e.target.value as AccountType})}
-                                      className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium cursor-pointer appearance-none truncate pr-10"
-                                  >
-                                    {accounts.map(acc => (
-                                        <option key={acc.id} value={acc.id}>Trừ tiền từ: {acc.name}</option>
-                                    ))}
-                                  </select>
-                                  <span className="material-symbols-rounded absolute right-3 top-3.5 text-slate-400 pointer-events-none text-[20px]">expand_more</span>
-                              </div>
-                          </div>
-                          <div className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus-within:border-slate-800 transition-all font-medium flex items-center relative">
-                              <span className="material-symbols-rounded absolute right-4 text-slate-400 text-[18px] pointer-events-none">calendar_today</span>
-                              <DatePicker selected={invForm.date} onChange={(date: Date | null) => date && setInvForm({...invForm, date})} dateFormat="dd/MM/yyyy" locale={vi} formatWeekDay={formatShortWeekday} className="w-full bg-transparent outline-none cursor-pointer" wrapperClassName="flex-1" />
-                          </div>
-                          <button onClick={handleAddProduct} className="w-full py-4 bg-slate-800 text-white font-bold rounded-2xl shadow-md active:scale-95 transition-all mt-2 flex items-center justify-center gap-2">
-                              <span className="material-symbols-rounded text-[20px]">inventory</span> Thêm vào kho
-                          </button>
-                      </div>
-                  </div>
-              ) : (
-                  <div className="bg-white p-5 sm:p-6 rounded-[32px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50">
-                      <div className="flex items-center justify-between mb-5">
-                          <div className="flex items-center gap-2">
-                              <div className="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-500">
-                                  <span className="material-symbols-rounded text-[18px]">loyalty</span>
-                              </div>
-                              <h3 className="font-extrabold text-lg text-slate-800">Quản lý Combo</h3>
-                          </div>
-                          <button 
-                            onClick={() => setShowComboCreator(!showComboCreator)}
-                            className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1 ${showComboCreator ? 'bg-slate-100 text-slate-600' : 'bg-indigo-600 text-white shadow-lg shadow-indigo-100'}`}
-                          >
-                              <span className="material-symbols-rounded text-sm">{showComboCreator ? 'close' : 'add'}</span>
-                              {showComboCreator ? 'Hủy' : 'Tạo Combo'}
-                          </button>
-                      </div>
-                      
-                      {showComboCreator && (() => {
-                          const comboCostPerUnit = comboForm.items.reduce((acc, item) => {
-                              const p = products.find(pp => pp.id === item.productId);
-                              return acc + (p ? (Number(p.originalPrice) || 0) * (parseInt(item.qty) || 0) : 0);
-                          }, 0);
-                          const packQty = parseInt(comboForm.packQty) || 0;
+                        </div>
 
-                          return (
-                          <div className="space-y-4 mb-8 p-4 bg-slate-50 border border-slate-200 rounded-2xl animate-in slide-in-from-top duration-300">
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                  <input type="text" placeholder="Tên combo (VD: Combo Chăm Sóc)" value={comboForm.name} onChange={e => setComboForm({...comboForm, name: e.target.value})} className="w-full bg-white border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
-                                  <input type="text" placeholder="Giá bán combo" value={comboForm.price} onChange={e => setComboForm({...comboForm, price: formatNumberInput(e.target.value)})} className="w-full bg-white border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
-                              </div>
-                              
-                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
-                                  <input type="text" placeholder="Mô tả combo (tuỳ chọn)" value={comboForm.description} onChange={e => setComboForm({...comboForm, description: e.target.value})} className="w-full bg-white border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
-                                  <div className="flex flex-col gap-1">
-                                      <label className="text-[10px] font-bold text-slate-400 px-1 uppercase">Số lượng combo đóng gói ngay</label>
-                                      <input type="number" placeholder="Số lượng đóng gói" value={comboForm.packQty} onChange={e => setComboForm({...comboForm, packQty: e.target.value})} className="w-full bg-white border border-indigo-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-600 transition-all font-bold text-indigo-600" />
-                                  </div>
-                              </div>
-                              
-                              <div className="space-y-2">
-                                  <div className="flex justify-between items-center px-1">
-                                      <label className="text-xs font-bold text-slate-500 uppercase">Sản phẩm trong combo</label>
-                                      <div className="text-[11px] font-bold text-indigo-500">Cost/ combo: {formatCurrency(comboCostPerUnit)}</div>
-                                  </div>
-                                  {comboForm.items.map((item, idx) => (
-                                      <div key={idx} className="flex gap-2">
-                                          <div className="flex-1 relative">
-                                              <select 
-                                                  value={item.productId}
-                                                  onChange={e => {
-                                                      const newItems = [...comboForm.items];
-                                                      newItems[idx].productId = e.target.value;
-                                                      setComboForm({...comboForm, items: newItems});
-                                                  }}
-                                                  className="w-full bg-white border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium appearance-none cursor-pointer"
-                                              >
-                                                  <option value="">Chọn sản phẩm...</option>
-                                                  {groups.map((g: any) => {
-                                                      const activeProd = g.products.find((p: any) => p.stock > 0) || g.products[0];
-                                                      return (
-                                                          <option key={g.key} value={activeProd.id}>{g.name} (Tồn: {g.totalStock})</option>
-                                                      );
-                                                  })}
-                                              </select>
-                                              <span className="material-symbols-rounded absolute right-3 top-2.5 text-slate-400 pointer-events-none text-[18px]">expand_more</span>
-                                          </div>
-                                          <input 
-                                              type="number" 
-                                              placeholder="SL" 
-                                              value={item.qty}
-                                              onChange={e => {
-                                                  const newItems = [...comboForm.items];
-                                                  newItems[idx].qty = e.target.value;
-                                                  setComboForm({...comboForm, items: newItems});
-                                              }}
-                                              className="w-20 bg-white border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium text-center" 
-                                          />
-                                          {comboForm.items.length > 1 && (
-                                              <button 
-                                                onClick={() => setComboForm({...comboForm, items: comboForm.items.filter((_, i) => i !== idx)})}
-                                                className="w-11 h-11 flex items-center justify-center text-rose-500 hover:bg-rose-50 rounded-xl"
-                                              >
-                                                  <span className="material-symbols-rounded">delete</span>
-                                              </button>
-                                          )}
-                                      </div>
-                                  ))}
-                                  <button 
-                                    onClick={() => setComboForm({...comboForm, items: [...comboForm.items, { productId: '', qty: '1' }]})}
-                                    className="w-full py-2 border-2 border-dashed border-slate-200 rounded-xl text-xs font-bold text-slate-400 hover:border-slate-300 hover:text-slate-500 transition-all"
-                                  >
-                                      + Thêm sản phẩm vào combo
-                                  </button>
-                              </div>
-                              
-                              <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 mt-2">
-                                  <div className="flex justify-between items-center text-indigo-700 font-bold text-sm">
-                                      <span>Tổng cost vốn ({packQty} combo):</span>
-                                      <span>{formatCurrency(comboCostPerUnit * packQty)}</span>
-                                  </div>
-                                  <p className="text-[10px] text-indigo-500 mt-1">* Hệ thống sẽ tự động trừ tồn kho các sản phẩm thành phần khi lưu.</p>
-                              </div>
-
+                        <div className="flex items-center gap-2 shrink-0">
+                          <p className={`font-semibold text-xs tracking-tight ${
+                            isSettlement ? 'text-[#5856d6]' :
+                            isMeoPaid || isIncome ? 'text-[#34c759]' :
+                            isTransfer ? 'text-[#86868b]' :
+                            'text-[#1d1d1f]'
+                          }`}>
+                            {isMeoPaid || isSettlement || isIncome ? '+' : isTransfer ? '' : '-'}{formatShortCurrency(displayAmount)}
+                          </p>
+                          
+                          {(!t.isSettled || t.type === TransactionType.SETTLEMENT || (t.type === TransactionType.INCOME && t.splitType === SplitType.MEO_PAID)) ? (
+                            <div className="flex items-center gap-1">
                               <button 
-                                onClick={handleAddCombo}
-                                className="w-full py-4 bg-indigo-600 text-white font-bold rounded-2xl shadow-lg shadow-indigo-100 active:scale-95 transition-all flex items-center justify-center gap-2"
+                                onClick={(e) => { e.stopPropagation(); handleEditTransaction(t); }} 
+                                className="w-7 h-7 rounded-full flex items-center justify-center text-[#86868b] hover:text-[#1d1d1f] hover:bg-black/[0.04] transition-colors"
                               >
-                                  <span className="material-symbols-rounded">inventory_2</span>
-                                  Xác nhận & Đóng gói Combo
+                                <span className="material-symbols-rounded text-sm">edit</span>
                               </button>
-                          </div>
-                      ); })()}
-
-                      <div className="space-y-4">
-                          {filteredCombos.length === 0 ? (
-                              <div className="text-center py-10">
-                                  <span className="material-symbols-rounded text-4xl text-slate-200">loyalty</span>
-                                  <p className="text-slate-400 text-sm mt-2">Chưa có combo nào được tạo</p>
-                              </div>
-                          ) : (
-                              filteredCombos.map(combo => (
-                                  <div key={combo.id} className="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm hover:shadow-md transition-all group relative overflow-hidden">
-                                      <div className="absolute right-0 top-0 w-24 h-24 bg-indigo-50 rounded-full -mr-12 -mt-12 transition-all group-hover:scale-110"></div>
-                                      <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                                          <div>
-                                              <h4 className="font-bold text-slate-800 text-lg flex items-center gap-2">
-                                                  {combo.name}
-                                                  <span className="bg-indigo-100 text-indigo-700 text-[10px] uppercase px-2 py-0.5 rounded-full">Combo</span>
-                                              </h4>
-                                              <p className="text-xs text-slate-500 mt-1 italic">{combo.description || 'Không có mô tả'}</p>
-                                              <div className="mt-3 space-y-1">
-                                                  {combo.items.map((item: any, i: number) => {
-                                                      const p = products.find(pp => pp.id === item.productId);
-                                                      return (
-                                                          <div key={i} className="flex items-center gap-2 text-[11px] text-slate-600">
-                                                              <div className="w-1.5 h-1.5 rounded-full bg-slate-300"></div>
-                                                              <span>{p?.name || 'Sản phẩm đã xoá'}: </span>
-                                                              <span className="font-bold text-slate-800">x{item.qty}</span>
-                                                          </div>
-                                                      );
-                                                  })}
-                                              </div>
-                                          </div>
-                                          <div className="flex flex-col items-end gap-3">
-                                              <div className="text-right">
-                                                  <div className="text-[10px] font-bold text-slate-400 uppercase leading-none">Tồn: <span className="text-slate-800 font-black">{combo.stock || 0}</span> • Vốn: {formatCurrency(combo.cost || 0)}</div>
-                                                  <div className="text-xl font-black text-indigo-600 mt-1">{formatCurrency(combo.price)}</div>
-                                              </div>
-                                              <div className="flex gap-2">
-                                                <button 
-                                                    onClick={() => {
-                                                        const confirm = window.confirm(`Đóng gói thêm 1 combo "${combo.name}"? (Sẽ trừ tồn kho sản phẩm tương ứng)`);
-                                                        if (!confirm) return;
-                                                        // This reuse of handleAddCombo for existing is tricky, 
-                                                        // I'll just set the form and toggle it if needed, 
-                                                        // but for speed I'll just implement the pack logic in a separate helper or just rely on the main creator.
-                                                        setComboForm({
-                                                            name: combo.name,
-                                                            price: formatNumberInput(String(combo.price)),
-                                                            description: combo.description || '',
-                                                            packQty: '1',
-                                                            items: combo.items.map((it: any) => ({ productId: it.productId, qty: String(it.qty) }))
-                                                        });
-                                                        setShowComboCreator(true);
-                                                        window.scrollTo({ top: 0, behavior: 'smooth' });
-                                                    }}
-                                                    className="px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 text-[10px] font-bold hover:bg-indigo-100 transition-all"
-                                                >
-                                                    + Pack thêm
-                                                </button>
-                                                <button 
-                                                    onClick={async () => {
-                                                        if (comboToDelete !== combo.id) {
-                                                            setComboToDelete(combo.id);
-                                                            return;
-                                                        }
-                                                        try {
-                                                            await supabaseService.deleteShopCombo(combo.id);
-                                                            setCombos(combos.filter(c => c.id !== combo.id));
-                                                            setComboToDelete(null);
-                                                            alert('Đã xoá combo');
-                                                        } catch (e) {
-                                                            alert('Lỗi khi xoá combo');
-                                                            setComboToDelete(null);
-                                                        }
-                                                    }}
-                                                    className={`h-8 px-3 rounded-full transition-all active:scale-90 flex items-center justify-center gap-1 text-[11px] font-bold ${
-                                                        comboToDelete === combo.id
-                                                        ? 'bg-red-500 text-white shadow-lg'
-                                                        : 'bg-rose-50 text-rose-500 hover:bg-rose-500 hover:text-white'
-                                                    }`}
-                                                >
-                                                    <span className="material-symbols-rounded text-lg">delete</span>
-                                                    {comboToDelete === combo.id ? 'Xác nhận?' : ''}
-                                                </button>
-                                              </div>
-                                          </div>
-                                      </div>
-                                  </div>
-                              ))
-                          )}
-                      </div>
-                  </div>
-              )}
-
-              <div className="space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between px-2 gap-3">
-                      <div className="flex items-center gap-2">
-                          <h3 className="font-extrabold text-lg text-slate-800">Kho hàng</h3>
-                          <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-md">{groups.length} món</span>
-                      </div>
-                      <div className="w-full sm:max-w-[260px] relative">
-                          <span className="material-symbols-rounded absolute left-3 top-2.5 text-slate-400 text-[20px]">search</span>
-                          <input
-                              value={invSearch}
-                              onChange={e => setInvSearch(e.target.value)}
-                              placeholder="Tìm tên sản phẩm..."
-                              className="w-full bg-white border border-slate-200 pl-10 pr-4 py-2.5 rounded-[14px] text-sm outline-none focus:border-slate-800 transition-all"
-                          />
-                      </div>
-                  </div>
-                  {groups.length === 0 ? (
-                      <p className="text-center text-slate-400 py-4 text-sm">Kho hàng trống</p>
-                  ) : (
-                    groups.map(g => {
-                        const isExpanded = expandedInvGroups.includes(g.key);
-                        const stockBadge = g.totalStock <= 0 ? 'bg-rose-50 text-rose-700 border-rose-100' : g.totalStock <= 3 ? 'bg-amber-50 text-amber-700 border-amber-100' : 'bg-emerald-50 text-emerald-700 border-emerald-100';
-                        const originalText = g.minOriginalPrice === g.maxOriginalPrice ? formatCurrency(g.minOriginalPrice) : `${formatCurrency(g.minOriginalPrice)} - ${formatCurrency(g.maxOriginalPrice)}`;
-                        const sellingText = g.minSellingPrice === g.maxSellingPrice ? formatCurrency(g.minSellingPrice) : `${formatCurrency(g.minSellingPrice)} - ${formatCurrency(g.maxSellingPrice)}`;
-                        const lots = g.products.slice().sort((a: any, b: any) => (Number(a.stock) - Number(b.stock)) || new Date(b.importDate).getTime() - new Date(a.importDate).getTime());
-                        return (
-                            <div key={g.key} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
-                                <div className="flex items-start justify-between gap-3">
-                                    <div className="flex items-start gap-3">
-                                        <div className={`min-w-[72px] h-[56px] rounded-2xl flex flex-col items-center justify-center border ${stockBadge}`}>
-                                            <div className="text-xl font-black leading-none">{g.totalStock}</div>
-                                            <div className="text-[10px] font-bold uppercase leading-none mt-1">{g.totalStock <= 0 ? 'Hết' : 'Còn'}</div>
-                                        </div>
-                                        <div>
-                                            <h4 className="font-bold text-slate-800 leading-snug">{g.name}</h4>
-                                            <div className="text-[11px] text-slate-500 mt-1">
-                                                {lots.length} dòng • Nhập gần nhất: {g.lastImportDate ? new Date(g.lastImportDate).toLocaleDateString('vi-VN') : '-'}
-                                                {g.totalStock <= 0 ? ' • Hết hàng' : g.totalStock <= 3 ? ' • Sắp hết' : ''}
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2 text-[11px]">
-                                                <div className="text-slate-600">Giá gốc: <span className="font-bold">{originalText}</span></div>
-                                                <div className="text-slate-600">Giá bán: <span className="font-bold text-slate-800">{sellingText}</span></div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <button
-                                        onClick={() => setExpandedInvGroups(prev => prev.includes(g.key) ? prev.filter(x => x !== g.key) : [...prev, g.key])}
-                                        className="px-3 py-1.5 text-xs font-bold rounded-lg bg-slate-100 text-slate-700 border border-slate-200 active:scale-95 transition-all"
-                                    >
-                                        {isExpanded ? 'Ẩn' : 'Chi tiết'}
-                                    </button>
-                                </div>
-                                
-                                {isExpanded && (
-                                    <div className="mt-4 space-y-2">
-                                        {lots.map((p: any) => (
-                                            <div key={p.id} className="bg-slate-50 border border-slate-200 rounded-xl p-3">
-                                                <div className="flex items-start justify-between gap-3">
-                                                    <div>
-                                                        <div className="text-sm font-bold text-slate-800">Tồn: <span className="text-indigo-600">{p.stock}</span></div>
-                                                        <div className="text-[11px] text-slate-500 mt-1">Nhập: {new Date(p.importDate).toLocaleDateString('vi-VN')}</div>
-                                                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2 text-[11px]">
-                                                            <div className="text-slate-600">Giá gốc: <span className="font-bold">{formatCurrency(p.originalPrice)}</span></div>
-                                                            <div className="text-slate-600">Giá bán: <span className="font-bold text-slate-800">{formatCurrency(p.sellingPrice)}</span></div>
-                                                            <div className="text-orange-600 font-bold">Shopee: {formatCurrency(p.sellingPrice * 1.3)}</div>
-                                                        </div>
-                                                    </div>
-                                                    <button
-                                                        onClick={() => {
-                                                            setEditingProduct(p);
-                                                            setEditProdForm({
-                                                                name: p.name || '',
-                                                                originalPrice: formatNumberInput(String(p.originalPrice || 0)),
-                                                                sellingPrice: formatNumberInput(String(p.sellingPrice || 0))
-                                                            });
-                                                        }}
-                                                        className="px-3 py-1.5 text-xs font-bold rounded-lg bg-white text-slate-700 border border-slate-200 active:scale-95 transition-all flex items-center gap-1"
-                                                        title="Chỉnh sửa sản phẩm"
-                                                    >
-                                                        <span className="material-symbols-rounded text-sm">edit</span>
-                                                        Sửa
-                                                    </button>
-                                                </div>
-                                                <div className="mt-3 flex justify-end gap-2">
-                                                    <button
-                                                        onClick={async () => {
-                                                            const qtyStr = window.prompt('Nhập số lượng cần nhập thêm', '1');
-                                                            if (!qtyStr) return;
-                                                            const qty = parseInt(qtyStr);
-                                                            if (isNaN(qty) || qty <= 0) { alert('Số lượng không hợp lệ'); return; }
-                                                            const priceStr = window.prompt('Giá gốc/đơn vị để ghi nhận chi phí (tuỳ chọn)', String(p.originalPrice || 0));
-                                                            const unitCost = parseSmartAmount(priceStr || '') || 0;
-                                                            try {
-                                                                const newStock = p.stock + qty;
-                                                                await supabaseService.updateShopProductStock(p.id, newStock);
-                                                                setProducts(prev => prev.map(x => x.id === p.id ? { ...x, stock: newStock } : x));
-                                                                if (unitCost > 0) {
-                                                                    const newFinance = {
-                                                                        id: Date.now().toString(),
-                                                                        shopId: activeShop,
-                                                                        type: 'EXPENSE',
-                                                                        amount: unitCost * qty,
-                                                                        description: `Nhập thêm hàng: ${p.name} (SL: ${qty})`,
-                                                                        category: 'Chi phí nhập hàng',
-                                                                        date: new Date().toISOString()
-                                                                    };
-                                                                    await supabaseService.addShopFinance(newFinance);
-                                                                    setShopFinances(prev => [newFinance, ...prev]);
-                                                                }
-                                                                const move = {
-                                                                    id: Date.now().toString() + '_in',
-                                                                    shopId: activeShop,
-                                                                    productId: p.id,
-                                                                    type: 'IN',
-                                                                    qty,
-                                                                    unitCost: unitCost || 0,
-                                                                    sellingPrice: 0,
-                                                                    reason: 'refill',
-                                                                    refId: null,
-                                                                    date: new Date().toISOString()
-                                                                };
-                                                                await supabaseService.addShopStockMove(move);
-                                                                alert('Đã cập nhật tồn kho');
-                                                            } catch (error) {
-                                                                console.error('Refill error:', error);
-                                                                alert('Lỗi khi nhập thêm hàng');
-                                                            }
-                                                        }}
-                                                        className="px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 active:scale-95 transition-all flex items-center gap-1"
-                                                        title="Nhập thêm hàng"
-                                                    >
-                                                        <span className="material-symbols-rounded text-sm">add</span>
-                                                        Nhập thêm
-                                                    </button>
-                                                    <button
-                                                        onClick={async () => {
-                                                            if (productToDelete !== p.id) {
-                                                                setProductToDelete(p.id);
-                                                                return;
-                                                            }
-                                                            const hasOrders = orders.some(o => o.productId === p.id);
-                                                            try {
-                                                                await supabaseService.deleteShopProduct(p.id);
-                                                                setProducts(prev => prev.filter(x => x.id !== p.id));
-                                                                setProductToDelete(null);
-                                                                alert('Đã xoá sản phẩm');
-                                                            } catch (error) {
-                                                                console.error('Error deleting product:', error);
-                                                                alert('Lỗi khi xoá sản phẩm');
-                                                                setProductToDelete(null);
-                                                            }
-                                                        }}
-                                                        className={`px-3 py-1.5 text-[11px] font-bold rounded-lg active:scale-95 transition-all flex items-center gap-1 border ${
-                                                            productToDelete === p.id 
-                                                            ? 'bg-red-500 text-white border-red-600 shadow-md' 
-                                                            : 'bg-rose-50 text-rose-600 border-rose-200'
-                                                        }`}
-                                                        title="Xoá sản phẩm"
-                                                    >
-                                                        <span className="material-symbols-rounded text-sm">delete</span>
-                                                        {productToDelete === p.id ? 'Xác nhận xoá?' : 'Xoá'}
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); handleDeleteTransaction(t.id); }} 
+                                className="w-7 h-7 rounded-full flex items-center justify-center text-[#86868b] hover:text-[#ff3b30] hover:bg-[#ff3b30]/10 transition-colors"
+                              >
+                                <span className="material-symbols-rounded text-sm">delete</span>
+                              </button>
                             </div>
-                        );
-                    })
-                  )}
-              </div>
-
-              {editingProduct && (
-                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
-                      <div className="w-full max-w-md bg-white rounded-[24px] border border-slate-100 shadow-xl p-5">
-                          <div className="flex items-center justify-between mb-4">
-                              <div className="font-bold text-slate-800">Chỉnh sửa sản phẩm</div>
-                              <button
-                                  onClick={() => setEditingProduct(null)}
-                                  className="w-9 h-9 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center active:scale-95"
-                                  title="Đóng"
-                              >
-                                  <span className="material-symbols-rounded text-slate-600">close</span>
-                              </button>
-                          </div>
-                          <div className="space-y-3">
-                              <input
-                                  value={editProdForm.name}
-                                  onChange={e => setEditProdForm({ ...editProdForm, name: e.target.value })}
-                                  placeholder="Tên sản phẩm"
-                                  className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500"
-                              />
-                              <div className="grid grid-cols-2 gap-3">
-                                  <input
-                                      value={editProdForm.originalPrice}
-                                      onChange={e => setEditProdForm({ ...editProdForm, originalPrice: formatNumberInput(e.target.value) })}
-                                      placeholder="Giá gốc"
-                                      className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500"
-                                  />
-                                  <input
-                                      value={editProdForm.sellingPrice}
-                                      onChange={e => setEditProdForm({ ...editProdForm, sellingPrice: formatNumberInput(e.target.value) })}
-                                      placeholder="Giá bán"
-                                      className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500"
-                                  />
-                              </div>
-                              <div className="grid grid-cols-2 gap-3 mt-2">
-                                  <button
-                                      onClick={() => setEditingProduct(null)}
-                                      className="w-full py-3 bg-slate-100 text-slate-700 font-bold rounded-xl border border-slate-200 active:scale-95 transition-all"
-                                  >
-                                      Huỷ
-                                  </button>
-                                  <button
-                                      onClick={async () => {
-                                          if (!editingProduct) return;
-                                          if (!editProdForm.name || !editProdForm.originalPrice || !editProdForm.sellingPrice) {
-                                              alert('Vui lòng nhập đủ thông tin');
-                                              return;
-                                          }
-                                          try {
-                                              const updates = {
-                                                  name: editProdForm.name,
-                                                  originalPrice: parseSmartAmount(editProdForm.originalPrice),
-                                                  sellingPrice: parseSmartAmount(editProdForm.sellingPrice)
-                                              };
-                                              await supabaseService.updateShopProduct(editingProduct.id, updates);
-                                              setProducts(prev => prev.map(x => x.id === editingProduct.id ? { ...x, ...updates } : x));
-                                              setEditingProduct(null);
-                                              alert('Đã cập nhật sản phẩm');
-                                          } catch (e) {
-                                              console.error('Update product error', e);
-                                              alert('Lỗi khi cập nhật sản phẩm');
-                                          }
-                                      }}
-                                      className="w-full py-3 bg-indigo-600 text-white font-bold rounded-xl shadow-md shadow-indigo-200 active:scale-95 transition-all"
-                                  >
-                                      Lưu
-                                  </button>
-                              </div>
-                          </div>
-                      </div>
-                  </div>
-              )}
-              
-              <div className="space-y-3">
-                  <div className="flex items-center justify-between px-1">
-                      <h3 className="font-bold text-slate-800">Lịch sử xuất - nhập</h3>
-                      <button
-                          onClick={async () => {
-                              const next = !showStockMoves;
-                              setShowStockMoves(next);
-                              if (next) {
-                                  try {
-                                      const moves = await supabaseService.getShopStockMoves(activeShop);
-                                      setStockMoves(moves);
-                                  } catch (e) {
-                                      console.error('Load stock moves error', e);
-                                      alert('Lỗi khi tải lịch sử xuất - nhập');
-                                  }
-                              }
-                          }}
-                          className="text-xs font-bold px-3 py-1.5 rounded-lg bg-slate-100 text-slate-700 border border-slate-200 active:scale-95"
-                      >
-                          {showStockMoves ? 'Ẩn' : 'Xem'}
-                      </button>
-                  </div>
-                  {showStockMoves && (
-                      <div className="space-y-2">
-                          {stockMoves.length === 0 ? (
-                              <p className="text-center text-slate-400 py-4 text-sm">Chưa có lịch sử</p>
                           ) : (
-                              stockMoves.slice(0, 50).map(m => {
-                                  const prod = products.find(pp => pp.id === m.productId);
-                                  return (
-                                      <div key={m.id} className="bg-white p-3 rounded-xl border border-slate-100 flex items-center justify-between">
-                                          <div className="flex items-center gap-3">
-                                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${m.type === 'IN' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-                                                  {m.type === 'IN' ? 'NHẬP' : 'XUẤT'}
-                                              </span>
-                                              <div>
-                                                  <div className="text-sm font-bold text-slate-800">{prod?.name || 'Sản phẩm'}</div>
-                                                  <div className="text-[11px] text-slate-500">
-                                                      {new Date(m.date).toLocaleDateString('vi-VN')} • SL: {m.qty} {m.type === 'IN' ? `• Giá gốc: ${formatCurrency(m.unitCost)}` : `• Giá bán: ${formatCurrency(m.sellingPrice)}`}
-                                                  </div>
-                                              </div>
-                                          </div>
-                                          <div className="text-right">
-                                              <div className="text-xs text-slate-500">{m.reason === 'order' ? 'Đơn bán' : m.reason === 'refill' ? 'Nhập thêm' : 'Nhập kho'}</div>
-                                          </div>
-                                      </div>
-                                  );
-                              })
+                            <div className="w-6 h-6 flex items-center justify-center text-[#86868b]/40" title="Đã khoá">
+                              <span className="material-symbols-rounded text-xs">lock</span>
+                            </div>
                           )}
+                        </div>
                       </div>
-                  )}
+                    );
+                  })}
+                </div>
               </div>
+            ))}
           </div>
-      );
+        )}
+      </div>
+    );
   };
 
-  const renderShopOrders = () => {
-      const activeProducts = products.filter(p => p.shopId === activeShop && p.stock > 0);
-      const activeOrders = orders.filter(o => o.shopId === activeShop).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      
-      const isShopee = ordForm.channel === 'Shopee';
-      const selectedLines = ordItems.filter(i => i.productId || i.comboId);
-      const getLineUnitPrice = (p: any | undefined, it: any) => {
-          if (it.isCombo) {
-              const combo = combos.find(c => c.id === it.comboId);
-              const override = parseSmartAmount(it.price || '') || 0;
-              return override > 0 ? override : (combo?.price || 0);
-          }
-          const base = p ? Number(p.sellingPrice) || 0 : 0;
-          const override = parseSmartAmount(it.price || '') || 0;
-          if (override > 0) return override;
-          if (!isShopee) return base;
-          return base * 1.3;
-      };
-      const detailPreview = selectedLines.map(i => {
-          const p = products.find(pp => pp.id === i.productId);
-          const combo = combos.find(c => c.id === i.comboId);
-          const q = parseInt(i.qty) || 1;
-          const price = getLineUnitPrice(p, i);
-          return { p, combo, q, price, total: q * price, productId: i.productId, comboId: i.comboId, isCombo: i.isCombo };
-      });
-      const totalOrder = detailPreview.reduce((s, d) => s + d.total, 0);
-      const voucher = parseSmartAmount(ordForm.voucher) || 0;
-      const baseForFee = Math.max(0, totalOrder - voucher);
-      const fixedFee = isShopee ? baseForFee * 0.17 : 0;
-      const serviceFee = isShopee ? 3000 : 0;
-      const vat = isShopee ? baseForFee * 0.01 : 0;
-      const pit = isShopee ? baseForFee * 0.005 : 0;
-      const paymentFee = isShopee ? (parseSmartAmount(ordForm.paymentFee) || 0) : 0;
-      const shipping = parseSmartAmount(ordForm.shipping) || 0;
-      const deposit = parseSmartAmount(ordForm.deposit) || 0;
-      const netRevenue = totalOrder - (isShopee ? voucher : 0) - fixedFee - serviceFee - vat - pit - paymentFee;
-
-      // (Đã hợp nhất tạo đơn sang nhiều sản phẩm; không còn handleCreateOrder đơn lẻ)
-
-      const handleUpdateOrder = async (orderId: string, field: string, value: string) => {
-          const order = orders.find(o => o.id === orderId);
-          if (!order) return;
-          
-          const updatedOrder = { ...order, [field]: value };
-          
-          try {
-              await supabaseService.updateShopOrder(orderId, { [field]: value });
-              
-              if (field === 'paymentMethod' && value === 'Tất toán' && order.paymentMethod !== value) {
-                  const remainingAmt = Math.max(0, order.netRevenue - (order.deposit || 0));
-                  
-                  if (remainingAmt > 0) {
-                      const newFinance = {
-                          id: Date.now().toString(),
-                          shopId: activeShop,
-                          type: 'INCOME',
-                          amount: remainingAmt,
-                          description: `Tất toán đơn hàng ${order.channel} - ${order.name}`,
-                          category: order.channel === 'Shopee' ? 'Doanh thu sàn TMĐT' : 'Doanh thu trực tiếp',
-                          date: new Date().toISOString()
-                      };
-                      await supabaseService.addShopFinance(newFinance);
-                      setShopFinances(prev => [newFinance, ...prev]);
-
-                      alert(`Đã cộng ${new Intl.NumberFormat('vi-VN').format(remainingAmt)}đ vào lợi nhuận tài chính cửa hàng.`);
-                  }
-              }
-              
-              setOrders(orders.map(o => o.id === orderId ? updatedOrder : o));
-          } catch (error) {
-              console.error("Error updating order:", error);
-              alert("Lỗi khi cập nhật đơn hàng");
-          }
-      };
-
-      return (
-          <div className="space-y-6 animate-fade-in">
-              <div className="flex bg-slate-100 p-1 rounded-xl relative">
-                   <div className={`absolute top-1 bottom-1 w-[calc(50%-4px)] bg-white rounded-lg shadow-sm transition-all duration-300 ease-spring ${
-                       orderTab === 'create' ? 'left-[calc(50%+2px)]' : 'left-1'
-                   }`}></div>
-                   <button onClick={() => setOrderTab('list')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all relative z-10 ${orderTab === 'list' ? 'text-indigo-600' : 'text-slate-400'}`}>Theo dõi đơn</button>
-                   <button onClick={() => setOrderTab('create')} className={`flex-1 py-2 rounded-lg text-sm font-bold transition-all relative z-10 ${orderTab === 'create' ? 'text-indigo-600' : 'text-slate-400'}`}>Tạo đơn mới</button>
-              </div>
-
-              {orderTab === 'create' ? (
-                  <div className="bg-white p-4 sm:p-6 rounded-[32px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50">
-                      <div className="flex flex-col mb-6 space-y-1">
-                          <h3 className="font-extrabold text-2xl text-slate-800 tracking-tight">Tạo đơn hàng</h3>
-                          <p className="text-sm text-slate-500 font-medium">Nhập thông tin đơn hàng mới để ghi nhận vào hệ thống</p>
-                      </div>
-                      
-                      <div className="space-y-6">
-                          {/* Section: Kênh bán hàng */}
-                          <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
-                              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3 block flex items-center gap-2">
-                                  <span className="material-symbols-rounded text-[18px]">storefront</span>
-                                  Kênh bán hàng
-                              </label>
-                              <div className="grid grid-cols-2 gap-2">
-                                  {['Shopee', 'Facebook', 'Instagram', 'Zalo'].map(c => (
-                                      <button 
-                                          key={c} 
-                                          onClick={() => setOrdForm({
-                                              ...ordForm,
-                                              channel: c,
-                                              ...(c === 'Shopee' ? { deposit: '', phone: '', address: '' } : {})
-                                          })} 
-                                          className={`py-3 rounded-xl text-sm font-bold transition-all flex items-center justify-center ${ordForm.channel === c ? 'bg-slate-800 text-white shadow-lg shadow-slate-200/50' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`}
-                                      >
-                                          {c}
-                                      </button>
-                                  ))}
-                              </div>
-                          </div>
-
-                          {/* Section: Thông tin khách hàng */}
-                          <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100 space-y-3">
-                              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1 block flex items-center gap-2">
-                                  <span className="material-symbols-rounded text-[18px]">person</span>
-                                  Khách hàng
-                              </label>
-                              <input type="text" placeholder="Tên khách hàng" value={ordForm.name} onChange={e => setOrdForm({...ordForm, name: e.target.value})} className="w-full bg-white border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 focus:ring-4 focus:ring-slate-100 transition-all font-medium placeholder-slate-400" />
-                              {!isShopee && (
-                                  <>
-                                      <input type="tel" placeholder="Số điện thoại" value={ordForm.phone} onChange={e => setOrdForm({...ordForm, phone: e.target.value})} className="h-fit w-full bg-white border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 focus:ring-4 focus:ring-slate-100 transition-all font-medium placeholder-slate-400" />
-                                      <input type="text" placeholder="Địa chỉ giao hàng" value={ordForm.address} onChange={e => setOrdForm({...ordForm, address: e.target.value})} className="w-full bg-white border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 focus:ring-4 focus:ring-slate-100 transition-all font-medium placeholder-slate-400" />
-                                  </>
-                              )}
-                          </div>
-
-                          {/* Section: Đặt cọc (Chỉ hiển thị ngoài Shopee) */}
-                          {!isShopee && (
-                              <div className="bg-emerald-50/30 p-4 rounded-2xl border border-emerald-100/50 space-y-3">
-                                  <label className="text-xs font-bold text-emerald-600 uppercase tracking-wider mb-1 block flex items-center gap-2">
-                                      <span className="material-symbols-rounded text-[18px]">payments</span>
-                                      Tiền cọc trước
-                                  </label>
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
-                                      <input type="text" placeholder="Nhập số tiền cọc (VNĐ)" value={ordForm.deposit} onChange={e => setOrdForm({...ordForm, deposit: formatNumberInput(e.target.value)})} className="w-full bg-white border border-emerald-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-50 transition-all font-bold text-emerald-700 placeholder-emerald-300" />
-                                      {parseSmartAmount(ordForm.deposit) > 0 && (
-                                          <div className="space-y-1 relative">
-                                              <select value={ordForm.depositAccountId} onChange={e => setOrdForm({...ordForm, depositAccountId: e.target.value as AccountType})} className="w-full bg-emerald-50 border border-emerald-200 text-emerald-700 px-4 py-3.5 rounded-xl text-sm font-bold outline-none cursor-pointer appearance-none pr-8">
-                                                  {accounts.map(a => <option key={a.id} value={a.id}>Cộng vào: {a.name}</option>)}
-                                              </select>
-                                              <span className="material-symbols-rounded absolute right-3 top-3.5 text-emerald-500 pointer-events-none text-[20px]">expand_more</span>
-                                          </div>
-                                      )}
-                                  </div>
-                              </div>
-                          )}
-
-                          {/* Section: Sản phẩm */}
-                          <div className="bg-slate-50/50 rounded-2xl border border-slate-100 overflow-hidden">
-                              <div className="bg-slate-100/50 p-4 border-b border-slate-100 flex items-center justify-between">
-                                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider flex items-center gap-2 m-0">
-                                      <span className="material-symbols-rounded text-[18px]">inventory_2</span>
-                                      Sản phẩm đơn hàng
-                                  </label>
-                                  <div className="flex gap-2">
-                                      {combos.length > 0 && (
-                                          <div className="relative">
-                                              <select 
-                                                  onChange={(e) => {
-                                                      const comboId = e.target.value;
-                                                      if (!comboId) return;
-                                                      const combo = combos.find(c => c.id === comboId);
-                                                      if (combo) {
-                                                          const totalSingles = combo.items.reduce((acc: number, it: any) => {
-                                                              const prod = products.find(pp => pp.id === it.productId);
-                                                              return acc + (Number(prod?.sellingPrice || 0) * it.qty);
-                                                          }, 0);
-                                                          const ratio = totalSingles > 0 ? (combo.price / totalSingles) : 1;
-                                                          const newLines = combo.items.map((item: any) => {
-                                                              const p = products.find(pp => pp.id === item.productId);
-                                                              const pPrice = p ? (Number(p.sellingPrice) * ratio) : 0;
-                                                              return {
-                                                                  productId: item.productId,
-                                                                  qty: String(item.qty),
-                                                                  price: isShopee ? formatNumberInput(String(pPrice * 1.3)) : formatNumberInput(String(pPrice))
-                                                              };
-                                                          });
-                                                          setOrdItems(prev => [...prev.filter(i => i.productId || i.comboId), { comboId: combo.id, qty: '1', price: formatNumberInput(String(combo.price)), isCombo: true }]);
-                                                          e.target.value = '';
-                                                      }
-                                                  }}
-                                                  className="text-[11px] font-bold pl-2 pr-6 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100 outline-none appearance-none cursor-pointer"
-                                              >
-                                                  <option value="">+ Combo (Đóng gói)</option>
-                                                  {combos.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                                              </select>
-                                              <span className="material-symbols-rounded absolute right-1.5 top-2 text-emerald-400 pointer-events-none text-sm">expand_more</span>
-                                          </div>
-                                      )}
-                                      <button onClick={() => setOrdItems([...ordItems, { productId: '', qty: '1', price: '' }])} className="text-[11px] font-bold px-3 py-1.5 rounded-lg bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 active:scale-95 transition-all flex items-center gap-1 shadow-sm">
-                                          <span className="material-symbols-rounded text-[14px]">add</span>Món lẻ
-                                      </button>
-                                  </div>
-                              </div>
-                              <div className="p-3 bg-slate-50 space-y-2">
-                                  {ordItems.map((it, idx) => {
-                                      if (it.isCombo) {
-                                          const combo = combos.find(c => c.id === it.comboId);
-                                          return (
-                                              <div key={idx} className="bg-white p-3 rounded-xl border border-emerald-200 shadow-sm flex flex-col sm:flex-row gap-2 relative group">
-                                                  <div className="flex-1 flex items-center px-4 py-3 bg-emerald-50 rounded-xl">
-                                                      <span className="material-symbols-rounded text-emerald-600 mr-2">loyalty</span>
-                                                      <div className="flex flex-col">
-                                                          <span className="text-sm font-bold text-slate-800">{combo?.name || 'Combo không xác định'}</span>
-                                                          <span className="text-[10px] text-emerald-600 font-bold uppercase tracking-tight">Combo đã đóng gói (Kho: {combo?.stock || 0})</span>
-                                                      </div>
-                                                  </div>
-                                                  <div className="flex items-center gap-2">
-                                                      <div className="relative w-20">
-                                                          <span className="absolute left-2.5 top-3 text-xs font-bold text-slate-400 pointer-events-none">SL </span>
-                                                          <input type="number" min="1" value={it.qty} onChange={e => setOrdItems(ordItems.map((x,i)=> i===idx ? {...x, qty: e.target.value} : x))} className="w-full bg-slate-50 border border-slate-200 pl-8 pr-2 py-3 rounded-xl text-sm outline-none text-center font-bold" />
-                                                      </div>
-                                                      <input
-                                                          type="text"
-                                                          placeholder="Giá combo"
-                                                          value={it.price || ''}
-                                                          onChange={e => setOrdItems(ordItems.map((x,i)=> i===idx ? { ...x, price: formatNumberInput(e.target.value) } : x))}
-                                                          className="w-[110px] bg-slate-50 border border-slate-200 px-3 py-3 rounded-xl text-sm outline-none text-right font-bold text-indigo-600"
-                                                      />
-                                                      <button onClick={() => setOrdItems(ordItems.filter((_,i)=>i!==idx))} className="w-11 h-[46px] flex items-center justify-center rounded-xl bg-rose-50 text-rose-500 hover:bg-rose-100 border border-rose-100 transition-colors">
-                                                          <span className="material-symbols-rounded text-[20px]">delete_outline</span>
-                                                      </button>
-                                                  </div>
-                                              </div>
-                                          );
-                                      }
-                                      return (
-                                          <div key={idx} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col sm:flex-row gap-2 relative group">
-                                              <div className="flex-1 relative">
-                                                  <select value={it.productId} onChange={e => {
-                                                      const nextProductId = e.target.value;
-                                                      setOrdItems(ordItems.map((x,i)=> {
-                                                          if (i !== idx) return x;
-                                                          const prod = products.find(pp => pp.id === nextProductId);
-                                                          const next: any = { ...x, productId: nextProductId };
-                                                          if (isShopee && (!x.price || x.price === '') && prod) {
-                                                              next.price = formatNumberInput(String((Number(prod.sellingPrice) || 0) * 1.3));
-                                                          }
-                                                          return next;
-                                                      }));
-                                                  }} className="w-full bg-slate-50 border border-slate-200 px-3 py-3 rounded-xl text-sm font-medium outline-none cursor-pointer appearance-none truncate pr-8">
-                                                      <option value="">-- Chọn sản phẩm --</option>
-                                                      {activeProducts.map(p => (
-                                                          <option key={p.id} value={p.id}>{p.name} (Kho: {p.stock})</option>
-                                                      ))}
-                                                  </select>
-                                                  <span className="material-symbols-rounded absolute right-2.5 top-3.5 text-slate-400 pointer-events-none text-[18px]">expand_more</span>
-                                              </div>
-                                              <div className="flex items-center gap-2">
-                                                  <div className="relative w-20">
-                                                      <span className="absolute left-2.5 top-3 text-xs font-bold text-slate-400 pointer-events-none">SL </span>
-                                                      <input type="number" min="1" value={it.qty} onChange={e => setOrdItems(ordItems.map((x,i)=> i===idx ? {...x, qty: e.target.value} : x))} className="w-full bg-slate-50 border border-slate-200 pl-8 pr-2 py-3 rounded-xl text-sm outline-none text-center font-bold" />
-                                                  </div>
-                                                  <input
-                                                      type="text"
-                                                      placeholder="Giá lẻ"
-                                                      value={it.price || ''}
-                                                      onChange={e => setOrdItems(ordItems.map((x,i)=> i===idx ? { ...x, price: formatNumberInput(e.target.value) } : x))}
-                                                      className="w-[110px] bg-slate-50 border border-slate-200 px-3 py-3 rounded-xl text-sm outline-none text-right font-bold text-emerald-600"
-                                                  />
-                                                  <button onClick={() => setOrdItems(ordItems.filter((_,i)=>i!==idx))} className="w-11 h-[46px] flex items-center justify-center rounded-xl bg-rose-50 text-rose-500 hover:bg-rose-100 border border-rose-100 transition-colors">
-                                                      <span className="material-symbols-rounded text-[20px]">delete_outline</span>
-                                                  </button>
-                                              </div>
-                                          </div>
-                                      );
-                                  })}
-                              </div>
-                          </div>
-
-                          {/* Section: Phụ phí & Khấu trừ */}
-                          <div className="space-y-3">
-                              <label className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1 block flex items-center gap-2">
-                                  <span className="material-symbols-rounded text-[18px]">receipt_long</span>
-                                  Phụ phí & Khấu trừ
-                              </label>
-                              <div className="bg-slate-50/50 p-4 rounded-2xl border border-slate-100">
-                                  <input type="text" placeholder="Phí vận chuyển thực tế (nếu có)" value={ordForm.shipping} onChange={e => setOrdForm({...ordForm, shipping: formatNumberInput(e.target.value)})} className="w-full bg-white border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-indigo-500 font-medium placeholder-slate-400" />
-                              </div>
-                              
-                              {isShopee && (
-                                  <div className="p-4 bg-orange-50/50 rounded-2xl border border-orange-200/50 space-y-4">
-                                      <div className="space-y-3">
-                                          <input type="text" placeholder="Trợ giá Voucher (trừ trực tiếp vào doanh thu)" value={ordForm.voucher} onChange={e => setOrdForm({...ordForm, voucher: formatNumberInput(e.target.value)})} className="w-full bg-white border border-orange-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-orange-500 font-bold text-orange-700 placeholder-orange-300" />
-                                          <input type="text" placeholder="Phí thanh toán (tự căn chỉnh/nhập thêm)" value={ordForm.paymentFee} onChange={e => setOrdForm({...ordForm, paymentFee: formatNumberInput(e.target.value)})} className="w-full bg-white border border-orange-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-orange-500 font-bold text-orange-700 placeholder-orange-300" />
-                                      </div>
-                                      
-                                      <div className="text-xs text-orange-800 font-medium space-y-1.5 bg-white p-3.5 rounded-xl border border-orange-100 shadow-sm leading-relaxed">
-                                          <div className="flex justify-between items-center pb-1border-b border-orange-50">
-                                              <span>Tổng tiền hàng (trừ VC):</span>
-                                              <span className="font-bold text-[13px]">{formatCurrency(baseForFee)}</span>
-                                          </div>
-                                          <div className="flex justify-between items-center text-orange-600/80">
-                                              <span>Phí cố định 17%:</span>
-                                              <span className="font-semibold">-{formatCurrency(fixedFee)}</span>
-                                          </div>
-                                          <div className="flex justify-between items-center text-orange-600/80">
-                                              <span>Phí dịch vụ:</span>
-                                              <span className="font-semibold">-3.000 đ</span>
-                                          </div>
-                                          <div className="flex justify-between items-center text-orange-600/80">
-                                              <span>Thuế GTGT 1% + TNCN 0.5%:</span>
-                                              <span className="font-semibold">-{formatCurrency(vat + pit)}</span>
-                                          </div>
-                                      </div>
-                                  </div>
-                              )}
-                          </div>
-
-                          {/* Tổng kết */}
-                          <div className="bg-slate-900 overflow-hidden rounded-2xl mt-6 shadow-xl shadow-slate-900/10">
-                              <div className="p-5">
-                                  <div className="flex justify-between items-center">
-                                      <div>
-                                          <span className="text-[13px] text-slate-400 font-medium tracking-wide">TỔNG LỢI NHUẬN THỰC THU</span>
-                                          <div className="text-3xl font-extrabold text-emerald-400 mt-0.5 tracking-tight">{formatCurrency(netRevenue)}</div>
-                                      </div>
-                                      <div className="w-12 h-12 rounded-full bg-emerald-500/10 flex items-center justify-center">
-                                          <span className="material-symbols-rounded text-emerald-400 text-[24px]">price_check</span>
-                                      </div>
-                                  </div>
-                              </div>
-                              <button onClick={async () => {
-                                  if (!ordForm.name) {
-                                      alert('Vui lòng nhập tên khách hàng');
-                                      return;
-                                  }
-                                  if (ordItems.every(i => !i.productId && !i.comboId)) {
-                                      alert('Vui lòng thêm ít nhất 1 sản phẩm hoặc combo');
-                                      return;
-                                  }
-                                  setIsLoading(true);
-                                  const isShopeeLocal = ordForm.channel === 'Shopee';
-                                  const detail = ordItems.filter(i=>(i.productId || i.comboId)).map(i => {
-                                      if (i.isCombo) {
-                                          const combo = combos.find(c => c.id === i.comboId);
-                                          const q = parseInt(i.qty) || 1;
-                                          const price = parseSmartAmount(i.price || '') || (combo?.price || 0);
-                                          return { combo, q, price, total: q * price, comboId: i.comboId, isCombo: true };
-                                      }
-                                      const p = products.find(pp => pp.id === i.productId);
-                                      const q = parseInt(i.qty) || 1;
-                                      let price = p ? Number(p.sellingPrice) || 0 : 0;
-                                      if (isShopeeLocal) {
-                                          const override = parseSmartAmount(i.price || '') || 0;
-                                          price = override > 0 ? override : price * 1.3;
-                                      } else {
-                                          const override = parseSmartAmount(i.price || '') || 0;
-                                          if (override > 0) price = override;
-                                      }
-                                      return { p, q, price, total: q * price, productId: i.productId, isCombo: false };
-                                  });
-                                  if (detail.length === 0) {
-                                      setIsLoading(false);
-                                      alert('Danh sách sản phẩm không hợp lệ');
-                                      return;
-                                  }
-                                  
-                                  // Process stock verification and collect lot updates
-                                  let hasStockError = false;
-                                  const productUpdates: any[] = [];
-                                  
-                                  for (const d of detail) {
-                                      if (d.isCombo) {
-                                          if (!d.combo) { alert('Combo không hợp lệ'); hasStockError = true; break; }
-                                          if (d.q > (d.combo.stock || 0)) { alert(`Số lượng vượt tồn combo: ${d.combo.name}`); hasStockError = true; break; }
-                                      } else {
-                                          if (!d.p) { alert('Sản phẩm không hợp lệ'); hasStockError = true; break; }
-                                          const pName = String(d.p.name || '').trim().toLowerCase();
-                                          const lots = products.filter(pp => String(pp.name || '').trim().toLowerCase() === pName && pp.shopId === activeShop && pp.stock > 0)
-                                                               .sort((a, b) => new Date(a.importDate || Date.now()).getTime() - new Date(b.importDate || Date.now()).getTime());
-                                          const totalAvailable = lots.reduce((acc, curr) => acc + curr.stock, 0);
-                                          
-                                          if (totalAvailable < d.q) {
-                                              alert(`Sản phẩm [${d.p.name}] không đủ tồn kho trong các lô (Cần ${d.q}, Hiện có tổng ${totalAvailable})`);
-                                              hasStockError = true;
-                                              break;
-                                          }
-                                          
-                                          let remaining = d.q;
-                                          for (const lot of lots) {
-                                              if (remaining <= 0) break;
-                                              const deduct = Math.min(lot.stock, remaining);
-                                              remaining -= deduct;
-                                              productUpdates.push({ id: lot.id, oldStock: lot.stock, used: deduct, name: lot.name, unitPrice: d.price, isCombo: false });
-                                          }
-                                      }
-                                  }
-                                  
-                                  if (hasStockError) {
-                                      setIsLoading(false);
-                                      return;
-                                  }
-                                  const total = detail.reduce((s,d)=>s+d.total,0);
-                                  const voucherLocal = parseSmartAmount(ordForm.voucher) || 0;
-                                  const baseForFeeLocal = Math.max(0, total - voucherLocal);
-                                  const fixedFeeLocal = isShopeeLocal ? baseForFeeLocal * 0.17 : 0;
-                                  const serviceFeeLocal = isShopeeLocal ? 3000 : 0;
-                                  const vatLocal = isShopeeLocal ? baseForFeeLocal * 0.01 : 0;
-                                  const pitLocal = isShopeeLocal ? baseForFeeLocal * 0.005 : 0;
-                                  const paymentFeeLocal = isShopeeLocal ? (parseSmartAmount(ordForm.paymentFee) || 0) : 0;
-                                  const netLocal = total - (isShopeeLocal ? voucherLocal : 0) - fixedFeeLocal - serviceFeeLocal - vatLocal - pitLocal - paymentFeeLocal;
-                                  const newOrder = {
-                                      id: Date.now().toString(),
-                                      shopId: activeShop,
-                                      channel: ordForm.channel,
-                                      name: ordForm.name,
-                                      phone: isShopeeLocal ? '' : ordForm.phone,
-                                      address: isShopeeLocal ? '' : ordForm.address,
-                                      productId: JSON.stringify(detail.map(d => ({ 
-                                          productId: d.isCombo ? null : d.productId, 
-                                          comboId: d.isCombo ? d.comboId : null,
-                                          qty: d.q, 
-                                          unitPrice: d.price,
-                                          isCombo: d.isCombo
-                                      }))),
-                                      qty: detail.reduce((s,d)=>s+d.q,0),
-                                      deposit: isShopeeLocal ? 0 : (parseSmartAmount(ordForm.deposit) || 0),
-                                      shipping: parseSmartAmount(ordForm.shipping) || 0,
-                                      voucher: parseSmartAmount(ordForm.voucher) || 0,
-                                      paymentFee: parseSmartAmount(ordForm.paymentFee) || 0,
-                                      status: ordForm.status,
-                                      paymentMethod: ordForm.paymentMethod,
-                                      totalAmount: total,
-                                      netRevenue: netLocal,
-                                      date: new Date().toISOString()
-                                  };
-                                  try {
-                                      await supabaseService.addShopOrder(newOrder);
-                                      for (const d of detail) {
-                                          if (d.isCombo && d.combo) {
-                                              const newComboStock = (d.combo.stock || 0) - d.q;
-                                              await supabaseService.updateShopComboStock(d.combo.id, newComboStock);
-                                          }
-                                      }
-                                      for (const u of productUpdates) {
-                                          await supabaseService.updateShopProductStock(u.id, u.oldStock - u.used);
-                                          const outMove = {
-                                              id: Date.now().toString() + '_out_' + u.id,
-                                              shopId: activeShop,
-                                              productId: u.id,
-                                              type: 'OUT',
-                                              qty: u.used,
-                                              unitCost: 0,
-                                              sellingPrice: u.unitPrice,
-                                              reason: 'order',
-                                              refId: newOrder.id,
-                                              date: newOrder.date
-                                          };
-                                          await supabaseService.addShopStockMove(outMove);
-                                      }
-
-                                      if (newOrder.deposit > 0 && ordForm.depositAccountId) {
-                                          const depositFinanceId = Date.now().toString() + '_dep';
-                                          const depositFinance = {
-                                              id: depositFinanceId,
-                                              shopId: activeShop,
-                                              type: 'INCOME' as const,
-                                              amount: newOrder.deposit,
-                                              description: `Cọc đơn hàng ${newOrder.channel} - ${newOrder.name}`,
-                                              category: 'Doanh thu trực tiếp',
-                                              date: newOrder.date
-                                          };
-                                          await supabaseService.addShopFinance(depositFinance);
-                                          setShopFinances([depositFinance, ...shopFinances]);
-
-                                          const depositTx = {
-                                              id: depositFinanceId,
-                                              date: newOrder.date,
-                                              description: `(Shop) Cọc đơn hàng ${newOrder.name}`,
-                                              amount: newOrder.deposit,
-                                              accountId: ordForm.depositAccountId,
-                                              splitType: SplitType.ME_ONLY,
-                                              type: TransactionType.INCOME,
-                                              isSettled: true
-                                          };
-                                          await supabaseService.addTransaction(depositTx);
-                                          setTransactions([depositTx, ...transactions]);
-                                          // Update account balance
-                                          setAccounts(accounts.map(a => a.id === ordForm.depositAccountId ? { ...a, balance: a.balance + depositTx.amount } : a));
-                                      }
-
-                                      setOrders([newOrder, ...orders]);
-                                      setProducts(products.map(p => {
-                                          const d = detail.find(x => !x.isCombo && x.p && x.p.id === p.id);
-                                          return d ? { ...p, stock: p.stock - d.q } : p;
-                                      }));
-                                      setCombos(combos.map(c => {
-                                          const d = detail.find(x => x.isCombo && x.comboId === c.id);
-                                          return d ? { ...c, stock: (c.stock || 0) - d.q } : c;
-                                      }));
-                                      alert('Tạo đơn hàng thành công!');
-                                      setOrdForm({ channel: 'Shopee', name: '', phone: '', address: '', productId: '', qty: '1', deposit: '', depositAccountId: AccountType.MB, shipping: '', voucher: '', paymentFee: '', status: 'Chưa Gửi Hàng', paymentMethod: 'Đang Thanh Toán' });
-                                      setOrdItems([{ productId: '', qty: '1', price: '' }, { productId: '', qty: '1', price: '' }]);
-                                      setOrderTab('list');
-                                  } catch (error) {
-                                      console.error('Error creating multi order:', error);
-                                      alert('Lỗi khi tạo đơn hàng');
-                                  } finally {
-                                      setIsLoading(false);
-                                  }
-                              }} className="w-full bg-slate-800 text-white font-bold py-4 rounded-b-2xl rounded-t-none border-t border-slate-700 hover:bg-slate-700 active:bg-slate-900 transition-colors flex items-center justify-center gap-2">
-                                  Tạo đơn ngay
-                                  <span className="material-symbols-rounded text-[20px]">arrow_forward</span>
-                              </button>
-                          </div>
-                      </div>
-                  </div>
-              ) : (
-                  <div className="space-y-4">
-                      {activeOrders.length === 0 ? (
-                          <p className="text-center text-slate-400 py-8 text-sm">Chưa có đơn hàng nào</p>
-                      ) : (
-                          activeOrders.map(o => (
-                              <div key={o.id} className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden mb-4">
-                                  <div className="p-4 bg-slate-50/50 border-b border-slate-100">
-                                      <div className="flex justify-between items-start">
-                                          <div>
-                                              <div className="flex items-center gap-2 mb-1.5">
-                                                  <span className={`text-[10px] px-2.5 py-1 rounded-full font-bold uppercase tracking-wider ${
-                                                      o.channel === 'Shopee' ? 'bg-orange-100 text-orange-600' :
-                                                      o.channel === 'Facebook' ? 'bg-blue-100 text-blue-600' :
-                                                      o.channel === 'Instagram' ? 'bg-pink-100 text-pink-600' : 'bg-indigo-100 text-indigo-600'
-                                                  }`}>{o.channel}</span>
-                                                  <span className="text-xs font-bold text-slate-500">
-                                                      {(() => {
-                                                          try {
-                                                              const arr = JSON.parse(o.productId);
-                                                              if (Array.isArray(arr) && arr.length > 0) {
-                                                                  const totalQ = arr.reduce((s:any, it:any) => s + (it.qty || 1), 0);
-                                                                  return `${arr.length} sản phẩm (x${totalQ})`;
-                                                              }
-                                                          } catch (e) {}
-                                                          const nm = products.find(p => p.id === o.productId)?.name || 'Sản phẩm';
-                                                          return `${nm} (x${o.qty})`;
-                                                      })()}
-                                                  </span>
-                                              </div>
-                                              <span className="text-sm font-bold text-slate-800">{o.name}</span>
-                                              <p className="text-[10px] text-slate-400 mt-0.5">{new Date(o.date).toLocaleDateString('vi-VN')} • {new Date(o.date).toLocaleTimeString('vi-VN', {hour: '2-digit', minute: '2-digit'})}</p>
-                                          </div>
-                                          <div className="text-right">
-                                              <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1 mt-1">Lợi nhuận</p>
-                                              <p className="text-base font-black text-emerald-500 tracking-tight">{formatCurrency(o.netRevenue)}</p>
-                                          </div>
-                                      </div>
-                                  </div>
-
-                                  <div className="p-4 text-sm">
-                                      {expandedOrders.includes(o.id) && (
-                                          <div className="mb-4 bg-slate-50 rounded-2xl p-4 border border-slate-100 text-xs">
-                                              {/* Sản phẩm */}
-                                              <div className="mb-4">
-                                                  <h4 className="font-bold text-slate-400 uppercase tracking-wider text-[10px] mb-2">Chi tiết sản phẩm</h4>
-                                                  <div className="space-y-2">
-                                                      {(() => {
-                                                          let items: any[] = [];
-                                                          try { const arr = JSON.parse(o.productId); if (Array.isArray(arr)) items = arr; } catch(e){}
-                                                          if (items.length === 0) items = [{ productId: o.productId, qty: o.qty }];
-                                                          const isShopeeLocal = o.channel === 'Shopee';
-                                                          return items.map((it, idx) => {
-                                                              const prod = products.find(p => p.id === it.productId);
-                                                              const name = prod?.name || 'Sản phẩm';
-                                                              const unit = prod ? prod.sellingPrice : 0;
-                                                              const savedUnitPrice = Number(it.unitPrice) || 0;
-                                                              const price = savedUnitPrice > 0 ? savedUnitPrice : (isShopeeLocal ? unit * 1.3 : unit);
-                                                              const qty = parseInt(it.qty) || 1;
-                                                              const line = qty * price;
-                                                              return (
-                                                                  <div key={idx} className="flex justify-between items-center bg-white p-2.5 rounded-xl border border-slate-100 shadow-sm">
-                                                                      <div className="font-bold text-slate-700">{name} <span className="text-slate-400 font-medium">x{qty}</span></div>
-                                                                      <div className="font-bold text-slate-800">{formatCurrency(line)}</div>
-                                                                  </div>
-                                                              );
-                                                          });
-                                                      })()}
-                                                  </div>
-                                              </div>
-
-                                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6 pt-4 border-t border-slate-200/60">
-                                                  <div>
-                                                      <h4 className="font-bold text-slate-400 uppercase tracking-wider text-[10px] mb-2">Khách hàng</h4>
-                                                      <div className="space-y-1 font-medium text-slate-600">
-                                                          <div><span className="text-slate-400">Tên:</span> {o.name}</div>
-                                                          <div><span className="text-slate-400">SĐT:</span> {o.phone || '-'}</div>
-                                                          <div className="leading-tight"><span className="text-slate-400">Đ/C:</span> {o.address || '-'}</div>
-                                                      </div>
-                                                  </div>
-                                                  <div className="text-sm font-medium text-slate-600 space-y-1.5 sm:border-l sm:border-slate-200/60 sm:pl-6 pt-4 sm:pt-0 border-t sm:border-t-0 border-slate-200/60">
-                                                      <div className="flex justify-between">
-                                                          <span className="text-slate-400">Voucher:</span>
-                                                          <span className="font-bold text-rose-500">-{formatCurrency(o.voucher || 0)}</span>
-                                                      </div>
-                                                      <div className="flex justify-between">
-                                                          <span className="text-slate-400">Vận chuyển:</span>
-                                                          <span className="font-bold">{formatCurrency(o.shipping || 0)}</span>
-                                                      </div>
-                                                      <div className="flex justify-between">
-                                                          <span className="text-slate-400">Phí giao dịch:</span>
-                                                          <span className="font-bold text-rose-500">-{formatCurrency(o.paymentFee || 0)}</span>
-                                                      </div>
-                                                      {o.channel !== 'Shopee' && (o.deposit || 0) > 0 && (
-                                                          <div className="flex justify-between items-center py-1 mt-1 bg-amber-50/50 rounded-lg px-2 -mx-2 border border-amber-100/50">
-                                                              <span className="text-amber-600 font-bold">Đặt cọc:</span>
-                                                              <span className="font-bold text-amber-600">-{formatCurrency(o.deposit || 0)}</span>
-                                                          </div>
-                                                      )}
-                                                      <div className="flex justify-between items-center pt-2 border-t border-slate-200/60 mt-2">
-                                                          <span className="font-bold text-slate-800">Cần thu thêm (Net)</span>
-                                                          <span className="font-black text-indigo-600 text-base">{formatCurrency(Math.max(0, o.netRevenue - (o.deposit || 0)))}</span>
-                                                      </div>
-                                                  </div>
-                                              </div>
-                                          </div>
-                                      )}
-
-                                      <div className="grid grid-cols-2 gap-3 mb-4">
-                                          <div>
-                                              <select 
-                                                  value={o.status} 
-                                                  onChange={e => handleUpdateOrder(o.id, 'status', e.target.value)}
-                                                  className={`w-full text-xs font-bold py-2.5 px-3 rounded-xl outline-none appearance-none cursor-pointer ${
-                                                      o.status === 'Thành Công' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' :
-                                                      o.status === 'Đang Giao' ? 'bg-blue-50 text-blue-700 border border-blue-100' :
-                                                      o.status === 'Đã Đặt Cọc' ? 'bg-amber-50 text-amber-700 border border-amber-100' :
-                                                      'bg-slate-100 text-slate-600 border border-transparent'
-                                                  }`}
-                                              >
-                                                  {['Chưa Gửi Hàng', 'Đã Đặt Cọc', 'Đang Giao', 'Thành Công'].map(s => (
-                                                      <option key={s} value={s}>{s}</option>
-                                                  ))}
-                                              </select>
-                                          </div>
-                                          <div>
-                                              <select 
-                                                  value={o.paymentMethod} 
-                                                  onChange={e => handleUpdateOrder(o.id, 'paymentMethod', e.target.value)}
-                                                  className={`w-full text-xs font-bold py-2.5 px-3 rounded-xl outline-none appearance-none cursor-pointer ${
-                                                      o.paymentMethod !== 'Đang Thanh Toán' ? 'bg-indigo-50 text-indigo-700 border border-indigo-100' : 'bg-slate-100 text-slate-600 border border-transparent'
-                                                  }`}
-                                              >
-                                                  {['Đang Thanh Toán', 'Tất toán'].map(s => (
-                                                      <option key={s} value={s}>{s}</option>
-                                                  ))}
-                                              </select>
-                                          </div>
-                                      </div>
-
-                                      <div className="flex gap-2">
-                                          <button
-                                              onClick={() => setExpandedOrders(prev => prev.includes(o.id) ? prev.filter(id => id !== o.id) : [...prev, o.id])}
-                                              className="flex-1 py-3 text-xs font-bold rounded-xl bg-slate-50 text-slate-700 hover:bg-slate-100 active:scale-95 transition-all flex items-center justify-center gap-1"
-                                          >
-                                              {expandedOrders.includes(o.id) ? 'Thu gọn' : 'Chi tiết'}
-                                          </button>
-                                          
-                                          <button
-                                              onClick={async () => {
-                                                  if (orderToDelete !== o.id) {
-                                                      setOrderToDelete(o.id);
-                                                      return;
-                                                  }
-                                                  try {
-                                                      if (o.productId && o.productId.startsWith('[')) {
-                                                          try {
-                                                              const arr = JSON.parse(o.productId);
-                                                              for (const it of arr) {
-                                                                  const prod = products.find(p => p.id === it.productId);
-                                                                  const q = parseInt(it.qty) || 1;
-                                                                  if (prod) {
-                                                                      await supabaseService.updateShopProductStock(prod.id, prod.stock + q);
-                                                                  }
-                                                              }
-                                                              setProducts(products.map(p => {
-                                                                  const it = arr.find((x:any) => x.productId === p.id);
-                                                                  if (it) {
-                                                                      const q = parseInt(it.qty) || 1;
-                                                                      return { ...p, stock: p.stock + q };
-                                                                  }
-                                                                  return p;
-                                                              }));
-                                                          } catch (e) {}
-                                                      } else {
-                                                          const prod = products.find(p => p.id === o.productId);
-                                                          if (prod) {
-                                                              await supabaseService.updateShopProductStock(prod.id, prod.stock + (o.qty || 1));
-                                                              setProducts(products.map(p => p.id === prod.id ? { ...p, stock: p.stock + (o.qty || 1) } : p));
-                                                          }
-                                                      }
-                                                      await supabaseService.deleteShopOrder(o.id);
-                                                      setOrders(orders.filter(x => x.id !== o.id));
-                                                      setOrderToDelete(null);
-                                                  } catch (err) {
-                                                      console.error('Delete order error', err);
-                                                      alert('Lỗi khi xoá đơn');
-                                                      setOrderToDelete(null);
-                                                  }
-                                              }}
-                                              className={`flex-1 py-3 text-xs font-bold rounded-xl transition-all ${
-                                                  orderToDelete === o.id 
-                                                  ? 'bg-red-500 text-white' 
-                                                  : 'bg-rose-50 text-rose-600 hover:bg-rose-100 active:scale-95'
-                                              }`}
-                                          >{orderToDelete === o.id ? 'Xác nhận xoá?' : 'Xoá đơn'}</button>
-                                          
-                                          <button
-                                              onClick={async () => {
-                                              const container = document.createElement('div');
-                                              container.style.position = 'fixed';
-                                              container.style.left = '-9999px';
-                                              container.style.top = '0';
-                                              container.style.width = '720px';
-                                              container.style.background = '#fff';
-                                              container.style.padding = '24px';
-                                              container.style.fontFamily = 'ui-sans-serif, system-ui';
-                                              const header = document.createElement('div');
-                                              header.style.display = 'flex';
-                                              header.style.justifyContent = 'space-between';
-                                              header.style.alignItems = 'center';
-                                              const seller = document.createElement('div');
-                                              const sTitle = document.createElement('div'); sTitle.textContent = 'ELANK STUDIO'; sTitle.style.fontSize = '18px'; sTitle.style.fontWeight = '800';
-                                              const sAddr = document.createElement('div'); sAddr.textContent = 'Địa chỉ: .................'; sAddr.style.fontSize = '12px'; sAddr.style.color = '#334155';
-                                              const sPhone = document.createElement('div'); sPhone.textContent = 'Điện thoại: .............'; sPhone.style.fontSize = '12px'; sPhone.style.color = '#334155';
-                                              seller.appendChild(sTitle); seller.appendChild(sAddr); seller.appendChild(sPhone);
-                                              const doc = document.createElement('div');
-                                              const dTitle = document.createElement('div'); dTitle.textContent = 'HOÁ ĐƠN BÁN LẺ'; dTitle.style.fontSize = '20px'; dTitle.style.fontWeight = '800';
-                                              const dInfo = document.createElement('div'); dInfo.textContent = `Số: ${o.id} • Ngày: ${new Date(o.date).toLocaleDateString('vi-VN')}`; dInfo.style.fontSize = '12px'; dInfo.style.color = '#64748b';
-                                              doc.appendChild(dTitle); doc.appendChild(dInfo);
-                                              header.appendChild(seller); header.appendChild(doc);
-                                              const buyer = document.createElement('div');
-                                              buyer.style.marginTop = '12px';
-                                              buyer.style.fontSize = '12px';
-                                              buyer.style.color = '#0f172a';
-                                              buyer.innerHTML = `<div>Khách hàng: <strong>${o.name}</strong></div>
-                                              <div>SĐT: ${o.phone || '-'}</div>
-                                              <div>Địa chỉ: ${o.address || '-'}</div>`;
-                                              const table = document.createElement('table');
-                                              table.style.width = '100%';
-                                              table.style.marginTop = '12px';
-                                              table.style.borderCollapse = 'collapse';
-                                              const thead = document.createElement('thead');
-                                              thead.innerHTML = '<tr><th style="border:1px solid #e2e8f0;padding:6px;text-align:left;font-size:12px">STT</th><th style="border:1px solid #e2e8f0;padding:6px;text-align:left;font-size:12px">Sản phẩm</th><th style="border:1px solid #e2e8f0;padding:6px;text-align:right;font-size:12px">SL</th><th style="border:1px solid #e2e8f0;padding:6px;text-align:right;font-size:12px">Đơn giá</th><th style="border:1px solid #e2e8f0;padding:6px;text-align:right;font-size:12px">Thành tiền</th></tr>';
-                                              const tbody = document.createElement('tbody');
-                                              let items:any[] = [];
-                                              try { const arr = JSON.parse(o.productId); if (Array.isArray(arr)) items = arr; } catch(e){}
-                                              if (items.length === 0) items = [{ productId: o.productId, qty: o.qty }];
-                                              let subtotal = 0;
-                                              items.forEach((it, idx) => {
-                                                  const prod = products.find(p => p.id === it.productId);
-                                                  const unit = prod ? prod.sellingPrice : 0;
-                                                  const savedUnitPrice = Number(it.unitPrice) || 0;
-                                                  const price = savedUnitPrice > 0 ? savedUnitPrice : (o.channel === 'Shopee' ? unit * 1.3 : unit);
-                                                  const q = parseInt(it.qty) || 1;
-                                                  const line = price * q;
-                                                  subtotal += line;
-                                                  const tr = document.createElement('tr');
-                                                  tr.innerHTML = `<td style="border:1px solid #e2e8f0;padding:6px;font-size:12px">${idx+1}</td>
-                                                  <td style="border:1px solid #e2e8f0;padding:6px;font-size:12px">${prod?.name || 'Sản phẩm'}</td>
-                                                  <td style="border:1px solid #e2e8f0;padding:6px;text-align:right;font-size:12px">${q}</td>
-                                                  <td style="border:1px solid #e2e8f0;padding:6px;text-align:right;font-size:12px">${new Intl.NumberFormat('vi-VN').format(price)}</td>
-                                                  <td style="border:1px solid #e2e8f0;padding:6px;text-align:right;font-size:12px">${new Intl.NumberFormat('vi-VN').format(line)}</td>`;
-                                                  tbody.appendChild(tr);
-                                              });
-                                              table.appendChild(thead); table.appendChild(tbody);
-                                              const sum = document.createElement('div');
-                                              sum.style.marginTop = '12px';
-                                              sum.style.fontSize = '12px';
-                                              const voucher = o.voucher || 0;
-                                              const baseForFee = Math.max(0, subtotal - voucher);
-                                              const fixedFee = o.channel === 'Shopee' ? baseForFee * 0.17 : 0;
-                                              const serviceFee = o.channel === 'Shopee' ? 3000 : 0;
-                                              const vat = o.channel === 'Shopee' ? baseForFee * 0.01 : 0;
-                                              const pit = o.channel === 'Shopee' ? baseForFee * 0.005 : 0;
-                                              const paymentFee = o.channel === 'Shopee' ? (o.paymentFee || 0) : 0;
-                                              const shipping = o.shipping || 0;
-                                              const net = o.netRevenue;
-                                              sum.innerHTML = `<div style="display:flex;justify-content:flex-end">
-                                                  <div style="width:420px">
-                                                    <div style="display:flex;justify-content:space-between"><span>Tạm tính</span><strong>${new Intl.NumberFormat('vi-VN').format(subtotal)}</strong></div>
-                                                    <div style="display:flex;justify-content:space-between"><span>Voucher</span><strong>-${new Intl.NumberFormat('vi-VN').format(voucher)}</strong></div>
-                                                    ${o.channel === 'Shopee' ? `
-                                                    <div style="display:flex;justify-content:space-between"><span>Phí cố định (17%)</span><strong>-${new Intl.NumberFormat('vi-VN').format(fixedFee)}</strong></div>
-                                                    <div style="display:flex;justify-content:space-between"><span>Phí dịch vụ</span><strong>-${new Intl.NumberFormat('vi-VN').format(serviceFee)}</strong></div>
-                                                    <div style="display:flex;justify-content:space-between"><span>Thuế GTGT (1%)</span><strong>-${new Intl.NumberFormat('vi-VN').format(vat)}</strong></div>
-                                                    <div style="display:flex;justify-content:space-between"><span>Thuế TNCN (0.5%)</span><strong>-${new Intl.NumberFormat('vi-VN').format(pit)}</strong></div>
-                                                    <div style="display:flex;justify-content:space-between"><span>Phí thanh toán</span><strong>-${new Intl.NumberFormat('vi-VN').format(paymentFee)}</strong></div>
-                                                    ` : ``}
-                                                    <div style="display:flex;justify-content:space-between"><span>Vận chuyển</span><strong>${new Intl.NumberFormat('vi-VN').format(shipping)}</strong></div>
-                                                    <div style="border-top:1px solid #e2e8f0;margin-top:6px;padding-top:6px;display:flex;justify-content:space-between"><span>Khách trả (Net)</span><strong>${new Intl.NumberFormat('vi-VN').format(net)}</strong></div>
-                                                  </div>
-                                                </div>`;
-                                              container.appendChild(header);
-                                              container.appendChild(buyer);
-                                              container.appendChild(table);
-                                              container.appendChild(sum);
-                                              document.body.appendChild(container);
-                                              try {
-                                                  const canvas = await html2canvas(container, { scale: 2, backgroundColor: '#ffffff' });
-                                                  const link = document.createElement('a');
-                                                  link.download = `Hoa-don-${o.name}-${new Date(o.date).toLocaleDateString('vi-VN').replace(/\//g,'-')}.png`;
-                                                  link.href = canvas.toDataURL('image/png');
-                                                  link.click();
-                                              } catch (err) {
-                                                  console.error('PNG export error', err);
-                                                  alert('Lỗi khi xuất PNG');
-                                              } finally {
-                                                  document.body.removeChild(container);
-                                              }
-                                          }}
-                                          className="flex-1 py-3 text-xs font-bold rounded-xl bg-indigo-50 text-indigo-600 hover:bg-indigo-100 active:scale-95 transition-all"
-                                      >Xuất PNG</button>
-                                      </div>
-                                  </div>
-                              </div>
-                          ))
-                      )}
-                  </div>
-              )}
-          </div>
-      );
-  };
-
-  const renderShopFinance = () => {
-      const activeFinances = shopFinances.filter(f => f.shopId === activeShop).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-      const totalIncome = activeFinances.filter(f => f.type === 'INCOME').reduce((sum, f) => sum + f.amount, 0);
-      const totalExpense = activeFinances.filter(f => f.type === 'EXPENSE').reduce((sum, f) => sum + f.amount, 0);
-      const balance = totalIncome - totalExpense;
-
-      const FINANCE_CATEGORIES = [
-          'Văn phòng phẩm', 'Vật tư đóng gói', 'In ấn - Sản xuất', 'Công nợ', 
-          'Tiền vận chuyển', 'Doanh thu sàn TMĐT', 'Doanh thu trực tiếp', 
-          'Khác', 'Đặt cọc', 'NHÀ ĐẦU TƯ', 'Quảng cáo'
-      ];
-
-      const handleAddFinance = async () => {
-          if (!finForm.amount || !finForm.desc) return alert('Vui lòng nhập đủ thông tin');
-          
-          const newFinance = {
-              id: Date.now().toString(),
-              shopId: activeShop,
-              type: finForm.type as 'INCOME' | 'EXPENSE',
-              amount: parseSmartAmount(finForm.amount),
-              description: finForm.desc,
-              category: finForm.category,
-              date: finForm.date.toISOString()
-          };
-          
-      try {
-          setIsLoading(true);
-          await supabaseService.addShopFinance(newFinance);
-          setShopFinances(prev => [newFinance, ...prev]);
-          setFinForm({ type: 'INCOME', amount: '', desc: '', category: 'Khác', date: new Date(), accountId: AccountType.MB });
-      } catch (error) {
-          console.error("Error adding finance:", error);
-          alert("Lỗi khi thêm giao dịch");
-      } finally {
-          setIsLoading(false);
-      }
-  };
-
-      return (
-          <div className="space-y-6 animate-fade-in pb-10">
-              {/* Bảng tóm tắt tài chính (Financial Summary) */}
-              <div className="bg-slate-900 rounded-[32px] p-6 text-white shadow-[0_8px_30px_rgb(0,0,0,0.08)] relative overflow-hidden">
-                  <div className="absolute -top-10 -right-10 w-40 h-40 bg-white opacity-5 rounded-full blur-2xl"></div>
-                  <div className="absolute -bottom-10 -left-10 w-40 h-40 bg-emerald-400 opacity-10 rounded-full blur-2xl"></div>
-                  
-                  <div className="relative z-10 flex flex-col items-center justify-center mb-6">
-                      <p className="text-sm font-medium text-slate-400 mb-1 tracking-wide uppercase">Lợi nhuận ròng</p>
-                      <h2 className="text-4xl font-extrabold tracking-tight text-white mb-2">{formatCurrency(balance)}</h2>
-                  </div>
-                  
-                  <div className="relative z-10 grid grid-cols-2 gap-4">
-                      <div className="bg-slate-800/50 p-4 rounded-3xl border border-slate-700/50 backdrop-blur-md">
-                          <div className="flex items-center gap-2 mb-1.5">
-                              <div className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center">
-                                  <span className="material-symbols-rounded text-emerald-400 text-[14px]">arrow_downward</span>
-                              </div>
-                              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Tổng thu</p>
-                          </div>
-                          <p className="text-lg font-bold text-emerald-400">{formatCurrency(totalIncome)}</p>
-                      </div>
-                      
-                      <div className="bg-slate-800/50 p-4 rounded-3xl border border-slate-700/50 backdrop-blur-md">
-                          <div className="flex items-center gap-2 mb-1.5">
-                              <div className="w-6 h-6 rounded-full bg-rose-500/20 flex items-center justify-center">
-                                  <span className="material-symbols-rounded text-rose-400 text-[14px]">arrow_upward</span>
-                              </div>
-                              <p className="text-[11px] font-bold text-slate-400 uppercase tracking-widest">Tổng chi</p>
-                          </div>
-                          <p className="text-lg font-bold text-rose-400">{formatCurrency(totalExpense)}</p>
-                      </div>
-                  </div>
-              </div>
-
-              {/* Form thêm giao dịch */}
-              <div className="bg-white p-5 sm:p-6 rounded-[32px] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-slate-100/50">
-                  <div className="flex items-center gap-2 mb-5">
-                      <div className="w-8 h-8 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-500">
-                          <span className="material-symbols-rounded text-[18px]">add_card</span>
-                      </div>
-                      <h3 className="font-extrabold text-lg text-slate-800">Thêm giao dịch</h3>
-                  </div>
-                  
-                  <div className="flex bg-slate-100/80 p-1.5 rounded-2xl mb-5 relative">
-                       <div className={`absolute top-1.5 bottom-1.5 w-[calc(50%-6px)] bg-white rounded-[14px] shadow-sm transition-all duration-300 ease-spring border border-slate-200/50 ${
-                           finForm.type === 'EXPENSE' ? 'left-[calc(50%+4px)]' : 'left-1.5'
-                       }`}></div>
-                       <button onClick={() => setFinForm({...finForm, type: 'INCOME'})} className={`flex-1 py-3 rounded-2xl text-sm font-bold transition-all relative z-10 flex items-center justify-center gap-2 ${finForm.type === 'INCOME' ? 'text-emerald-600' : 'text-slate-500 hover:text-slate-700'}`}>
-                           <span className="material-symbols-rounded text-[18px]">add_circle</span> Thu vào
-                       </button>
-                       <button onClick={() => setFinForm({...finForm, type: 'EXPENSE'})} className={`flex-1 py-3 rounded-2xl text-sm font-bold transition-all relative z-10 flex items-center justify-center gap-2 ${finForm.type === 'EXPENSE' ? 'text-rose-600' : 'text-slate-500 hover:text-slate-700'}`}>
-                           <span className="material-symbols-rounded text-[18px]">do_not_disturb_on</span> Chi ra
-                       </button>
-                  </div>
-                  
-                  <div className="space-y-4">
-                      <div className="relative">
-                          <span className={`absolute left-4 top-3.5 font-bold ${finForm.type === 'INCOME' ? 'text-emerald-500' : 'text-rose-500'}`}>₫</span>
-                          <input type="text" placeholder="Nhập số tiền" value={finForm.amount} onChange={e => setFinForm({...finForm, amount: formatNumberInput(e.target.value)})} className="w-full bg-slate-50 border border-slate-200 pl-8 pr-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 focus:ring-4 focus:ring-slate-100 transition-all font-bold placeholder-slate-400" />
-                      </div>
-                      
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          <div className="relative">
-                              <select value={finForm.category} onChange={e => setFinForm({...finForm, category: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium cursor-pointer appearance-none truncate pr-8">
-                                  {FINANCE_CATEGORIES.map(cat => (
-                                      <option key={cat} value={cat}>{cat}</option>
-                                  ))}
-                              </select>
-                              <span className="material-symbols-rounded absolute right-3 top-3.5 text-slate-400 pointer-events-none text-[18px]">expand_more</span>
-                          </div>
-                          <div className="relative">
-                              <select 
-                                  value={finForm.accountId} 
-                                  onChange={e => setFinForm({...finForm, accountId: e.target.value as AccountType})}
-                                  className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium cursor-pointer appearance-none truncate pr-8"
-                              >
-                                  {accounts.map(acc => (
-                                      <option key={acc.id} value={acc.id}>{acc.name}</option>
-                                  ))}
-                              </select>
-                              <span className="material-symbols-rounded absolute right-3 top-3.5 text-slate-400 pointer-events-none text-[18px]">expand_more</span>
-                          </div>
-                      </div>
-                      
-                      <input type="text" placeholder="Nội dung, ghi chú giao dịch" value={finForm.desc} onChange={e => setFinForm({...finForm, desc: e.target.value})} className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus:border-slate-800 transition-all font-medium placeholder-slate-400" />
-                      
-                      <div className="w-full bg-slate-50 border border-slate-200 px-4 py-3.5 rounded-xl text-sm outline-none focus-within:border-slate-800 transition-all font-medium flex items-center relative">
-                          <span className="material-symbols-rounded absolute right-4 text-slate-400 text-[18px] pointer-events-none">calendar_today</span>
-                          <DatePicker selected={finForm.date} onChange={(date: Date | null) => date && setFinForm({...finForm, date})} dateFormat="dd/MM/yyyy" locale={vi} formatWeekDay={formatShortWeekday} className="w-full bg-transparent outline-none cursor-pointer" wrapperClassName="flex-1" />
-                      </div>
-                      
-                      <button onClick={handleAddFinance} className="w-full py-4 mt-2 bg-slate-800 text-white font-bold rounded-2xl shadow-md active:scale-95 transition-all flex justify-center items-center gap-2">
-                          <span className="material-symbols-rounded text-[20px]">save</span> Lưu giao dịch
-                      </button>
-                  </div>
-              </div>
-
-              {/* Lịch sử giao dịch */}
-              <div className="space-y-4">
-                  <div className="flex items-center justify-between px-2">
-                      <h3 className="font-extrabold text-lg text-slate-800">Lịch sử giao dịch</h3>
-                      <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-md">{activeFinances.length} gd</span>
-                  </div>
-                  
-                  {activeFinances.length === 0 ? (
-                      <div className="flex flex-col flex-1 items-center justify-center p-8 bg-slate-50/50 rounded-3xl border border-dashed border-slate-200">
-                          <span className="material-symbols-rounded text-[40px] text-slate-200 mb-2">receipt_long</span>
-                          <p className="text-sm font-medium text-slate-400">Chưa có giao dịch nào</p>
-                      </div>
-                  ) : (
-                      <div className="space-y-3">
-                          {activeFinances.map(f => (
-                              <div key={f.id} className="bg-white p-4 rounded-[20px] shadow-[0_2px_10px_rgb(0,0,0,0.02)] border border-slate-100/80 flex justify-between items-start gap-3 group transition-all hover:shadow-md hover:border-slate-200">
-                                  <div className="flex items-start gap-4 min-w-0 flex-1">
-                                      <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 border ${f.type === 'INCOME' ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-rose-50 border-rose-100 text-rose-600'}`}>
-                                          <span className="material-symbols-rounded text-[24px]">{f.type === 'INCOME' ? 'south_west' : 'north_east'}</span>
-                                      </div>
-                                      <div className="flex flex-col gap-1.5 min-w-0">
-                                          <h4 className="font-bold text-slate-800 text-sm leading-tight break-words">{f.description}</h4>
-                                          <div className="flex items-center gap-1.5 flex-wrap">
-                                              <span className="text-[10px] bg-slate-100 text-slate-500 border border-slate-200/60 px-1.5 py-0.5 rounded-md font-bold uppercase tracking-wider">{f.category || 'Khác'}</span>
-                                              <p className="text-[11px] text-slate-400 font-medium whitespace-nowrap">· {new Date(f.date).toLocaleDateString('vi-VN')}</p>
-                                          </div>
-                                      </div>
-                                  </div>
-                                  <div className="flex flex-col items-end gap-2 shrink-0">
-                                      <p className={`font-extrabold text-[15px] tracking-tight ${f.type === 'INCOME' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                                          {f.type === 'INCOME' ? '+' : '-'}{formatCurrency(f.amount)}
-                                      </p>
-                                      <button
-                                          onClick={async () => {
-                                              if (financeToDelete !== f.id) {
-                                                  setFinanceToDelete(f.id);
-                                                  return;
-                                              }
-                                              setIsLoading(true);
-                                              try {
-                                                  // 1. Delete from Supabase
-                                                  await supabaseService.deleteShopFinance(f.id);
-                                                  
-                                                  // 2. Check and delete corresponding transaction in wallet if it shares the same ID
-                                                  const relatedTx = transactions.find(tx => tx.id === f.id);
-                                                  if (relatedTx) {
-                                                      await supabaseService.deleteTransaction(f.id);
-                                                      setTransactions(prev => prev.filter(t => t.id !== f.id));
-                                                      // Update account balance
-                                                      setAccounts(prev => prev.map(a => {
-                                                          if (a.id === relatedTx.accountId) {
-                                                              const diff = relatedTx.type === TransactionType.INCOME ? -relatedTx.amount : relatedTx.amount;
-                                                              return { ...a, balance: a.balance + diff };
-                                                          }
-                                                          return a;
-                                                      }));
-                                                  }
-                                                  
-                                                  // 3. Update local state
-                                                  setShopFinances(prev => prev.filter(x => x.id !== f.id));
-                                                  setFinanceToDelete(null);
-                                                  alert('Đã xoá giao dịch thành công!');
-                                              } catch (err: any) {
-                                                  console.error('Delete finance error', err);
-                                                  setFinanceToDelete(null);
-                                                  if (err?.code === '42501') {
-                                                      alert("Lỗi bảo mật (RLS)!\n\nVui lòng chạy lệnh sau trong Supabase SQL Editor:\n\nCREATE POLICY \"Enable all\" ON shop_finances FOR ALL USING (true) WITH CHECK (true);");
-                                                  } else {
-                                                      alert('Lỗi khi xoá giao dịch');
-                                                  }
-                                              } finally {
-                                                  setIsLoading(false);
-                                              }
-                                          }}
-                                          className={`flex items-center gap-1 transition-all px-2 py-1 text-[11px] font-bold rounded-lg ${
-                                              financeToDelete === f.id
-                                              ? 'bg-red-500 text-white shadow-md'
-                                              : 'bg-rose-50 text-rose-600 hover:bg-rose-100 active:scale-95 sm:opacity-0 group-hover:opacity-100'
-                                          }`}
-                                      >
-                                          <span className="material-symbols-rounded text-[14px]">delete</span>
-                                          {financeToDelete === f.id ? 'Xác nhận xoá?' : 'Xoá'}
-                                      </button>
-                                  </div>
-                              </div>
-                          ))}
-                      </div>
-                  )}
-              </div>
-          </div>
-      );
-  };
-
-  const renderPiggy = () => {
-      const mb = accounts.find(a => a.id === AccountType.MB)?.balance || 0;
-      const tet = accounts.find(a => a.id === AccountType.TET_SAVING)?.balance || 0;
-      const available = mb - tet;
-      const todayKey = toDateKey(new Date());
-
-      const goalAmount = piggyPlan?.goalAmount || parseSmartAmount(piggyGoal) || 0;
-      const doneTotal = piggyPlan ? piggyPlan.days.filter(d => d.done).reduce((s, d) => s + d.amount, 0) : 0;
-      const remainingTotal = Math.max(0, goalAmount - doneTotal);
-      const doneDays = piggyPlan ? piggyPlan.days.filter(d => d.done).length : 0;
-      const totalDays = piggyPlan ? piggyPlan.days.length : 0;
-      const progressPct = piggyPlan && goalAmount > 0 ? Math.min(100, Math.round((doneTotal / goalAmount) * 100)) : 0;
-      const goldTotalPhan = goldState?.totalPhan || 0;
-      const goldUnits = fromTotalPhan(goldTotalPhan);
-
-      return (
-          <div className="pb-32 animate-fade-in pt-4 space-y-6">
-              <div className="flex items-center justify-between mb-1 px-1">
-                  <h2 className="text-2xl font-bold text-slate-800">Ống heo</h2>
-                  {piggyPlan && (
-                      <button
-                          onClick={() => {
-                              if (!window.confirm('Xoá kế hoạch Ống heo hiện tại?')) return;
-                              const currentId = piggyPlan.id;
-                              setPiggyPlan(null);
-                              supabaseService.deletePiggyPlan(currentId).catch(() => {});
-                          }}
-                          className="text-xs font-bold px-3 py-2 rounded-xl bg-rose-50 text-rose-600 border border-rose-200 active:scale-95"
-                      >
-                          Xoá kế hoạch
-                      </button>
-                  )}
-              </div>
-
-              <div className="bg-gradient-to-br from-pink-500 to-rose-600 rounded-3xl p-5 text-white shadow-lg shadow-pink-200 relative overflow-hidden">
-                  <div className="absolute -top-10 -right-10 w-40 h-40 bg-white opacity-10 rounded-full blur-2xl"></div>
-                  <div className="relative z-10 space-y-3">
-                      <div className="flex items-start justify-between gap-4">
-                          <div>
-                              <p className="text-pink-100 text-sm font-medium mb-1 flex items-center gap-1">
-                                  <span className="material-symbols-rounded text-sm">celebration</span>
-                                  Tiết kiệm ăn Tết
-                              </p>
-                              <p className="text-3xl font-bold tracking-tight">{formatCurrency(tet)}</p>
-                          </div>
-                          <div className="text-right">
-                              <p className="text-[10px] text-pink-100 uppercase tracking-wider font-bold">Khả dụng MB</p>
-                              <p className="text-lg font-bold">{formatCurrency(available)}</p>
-                          </div>
-                      </div>
-
-                      {piggyPlan && (
-                          <div className="bg-white/10 rounded-2xl p-3 border border-white/10">
-                              <div className="flex items-center justify-between text-xs font-bold text-pink-100">
-                                  <span>Tiến độ</span>
-                                  <span>{progressPct}%</span>
-                              </div>
-                              <div className="h-2 bg-white/15 rounded-full mt-2 overflow-hidden">
-                                  <div className="h-full bg-white/80 rounded-full" style={{ width: `${progressPct}%` }}></div>
-                              </div>
-                          </div>
-                      )}
-                  </div>
-              </div>
-
-              <div className="bg-white p-5 rounded-[24px] shadow-sm border border-slate-100">
-                  <h3 className="font-bold text-slate-800 mb-4">Thiết lập mục tiêu</h3>
-                  <div className="space-y-4">
-                      <div>
-                          <label className="text-xs font-bold text-slate-500 mb-1.5 block">Số tiền mục tiêu</label>
-                          <input
-                              type="text"
-                              inputMode="numeric"
-                              placeholder="0"
-                              value={piggyGoal}
-                              onChange={(e) => setPiggyGoal(formatNumberInput(e.target.value))}
-                              className="w-full bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl text-sm outline-none focus:border-indigo-500"
-                          />
-                      </div>
-                      <div>
-                          <label className="text-xs font-bold text-slate-500 mb-1.5 block">Ngày hoàn thành</label>
-                          <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 px-4 py-3 rounded-xl">
-                              <span className="material-symbols-rounded text-slate-400">calendar_month</span>
-                              <DatePicker
-                                  selected={piggyTargetDate}
-                                  onChange={(date) => date && setPiggyTargetDate(date)}
-                                  dateFormat="dd/MM/yyyy"
-                                  locale={vi}
-                                  minDate={new Date()}
-                                  className="bg-transparent outline-none text-sm font-bold text-slate-700 w-full"
-                              />
-                          </div>
-                      </div>
-                      <div className="grid grid-cols-1 gap-2">
-                          <button
-                              onClick={handleCreatePiggyPlan}
-                              className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl shadow-md shadow-slate-200 active:scale-95 transition-all"
-                          >
-                              Tạo kế hoạch ngẫu nhiên
-                          </button>
-                          {piggyPlan && (
-                              <button
-                                  onClick={() => {
-                                      if (!window.confirm('Tạo lại kế hoạch ngẫu nhiên sẽ reset các ngày đã đánh dấu. Tiếp tục?')) return;
-                                      handleCreatePiggyPlan();
-                                  }}
-                                  className="w-full py-3 bg-white text-slate-700 font-bold rounded-xl border border-slate-200 active:scale-95 transition-all"
-                              >
-                                  Tạo lại ngẫu nhiên
-                              </button>
-                          )}
-                      </div>
-                  </div>
-              </div>
-
-              {piggyPlan && (
-                  <div className="space-y-4">
-                      <div className="bg-white p-5 rounded-[24px] shadow-sm border border-slate-100">
-                          <div className="flex items-start justify-between gap-3">
-                              <div>
-                                  <h3 className="font-bold text-slate-800">Tổng quan</h3>
-                                  <p className="text-xs text-slate-500 mt-1">
-                                      Mục tiêu: <span className="font-bold text-slate-700">{formatCurrency(piggyPlan.goalAmount)}</span> • Hạn: <span className="font-bold text-slate-700">{new Date(piggyPlan.targetDate).toLocaleDateString('vi-VN')}</span>
-                                  </p>
-                              </div>
-                              <div className="text-right">
-                                  <p className="text-[10px] text-slate-400 uppercase font-bold">Đã góp</p>
-                                  <p className="text-sm font-bold text-emerald-600">{formatCurrency(doneTotal)}</p>
-                              </div>
-                          </div>
-                          <div className="grid grid-cols-3 gap-2 mt-4">
-                              <div className="bg-slate-50 rounded-2xl p-3 border border-slate-100">
-                                  <p className="text-[10px] text-slate-400 uppercase font-bold">Còn lại</p>
-                                  <p className="text-sm font-bold text-slate-800">{formatCurrency(remainingTotal)}</p>
-                              </div>
-                              <div className="bg-slate-50 rounded-2xl p-3 border border-slate-100">
-                                  <p className="text-[10px] text-slate-400 uppercase font-bold">Ngày đã góp</p>
-                                  <p className="text-sm font-bold text-slate-800">{doneDays}/{totalDays}</p>
-                              </div>
-                              <div className="bg-slate-50 rounded-2xl p-3 border border-slate-100">
-                                  <p className="text-[10px] text-slate-400 uppercase font-bold">TB/ngày</p>
-                                  <p className="text-sm font-bold text-slate-800">
-                                      {formatCurrency(totalDays > 0 ? Math.round(piggyPlan.goalAmount / totalDays) : 0)}
-                                  </p>
-                              </div>
-                          </div>
-                      </div>
-
-                      <div className="bg-white p-5 rounded-[24px] shadow-sm border border-slate-100">
-                          <h3 className="font-bold text-slate-800 mb-3">Danh sách ngày</h3>
-                          <div className="space-y-2">
-                              {piggyPlan.days.slice().sort((a, b) => (a.done === b.done ? 0 : a.done ? 1 : -1)).map(d => {
-                                  const isToday = d.date === todayKey;
-                                  const isPast = d.date < todayKey;
-                                  const bg = d.done
-                                      ? 'bg-emerald-50 border-emerald-100'
-                                      : isToday
-                                          ? 'bg-indigo-50 border-indigo-100'
-                                          : isPast
-                                              ? 'bg-amber-50 border-amber-100'
-                                              : 'bg-white border-slate-100';
-                                  return (
-                                      <div key={d.date} className={`p-3 rounded-2xl border flex items-center justify-between gap-3 ${bg}`}>
-                                          <div className="min-w-0">
-                                              <p className="text-sm font-bold text-slate-800">
-                                                  {parseDateKey(d.date).toLocaleDateString('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit' })}
-                                              </p>
-                                              <p className="text-[11px] text-slate-500">
-                                                  {d.done ? 'Đã góp' : isPast ? 'Quá hạn' : isToday ? 'Hôm nay' : 'Chưa góp'}
-                                              </p>
-                                          </div>
-                                          <div className="text-right flex items-center gap-2">
-                                              <div>
-                                                  <p className="text-[10px] text-slate-400 uppercase font-bold">Số tiền</p>
-                                                  <p className="text-sm font-bold text-slate-800">{formatCurrency(d.amount)}</p>
-                                              </div>
-                                              <button
-                                                  onClick={() => handleTogglePiggyDay(d.date)}
-                                                  className={`px-3 py-2 rounded-xl text-xs font-bold border active:scale-95 transition-all ${
-                                                      d.done
-                                                          ? 'bg-white text-slate-700 border-slate-200'
-                                                          : 'bg-slate-900 text-white border-slate-900'
-                                                  }`}
-                                              >
-                                                  {d.done ? 'Hoàn tác' : 'Đã góp'}
-                                              </button>
-                                          </div>
-                                      </div>
-                                  );
-                              })}
-                          </div>
-                      </div>
-                  </div>
-              )}
-          </div>
-      );
-  };
-
+  // SHOP SCREEN (Apple Store Manager aesthetic)
   const renderShop = () => {
-      const shops = [
-          { id: 'elank', name: 'Elank Studio', icon: 'palette' }
-      ];
+    const activeFinances = shopFinances.filter(f => f.shopId === activeShop).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    const shopIncome = activeFinances.filter(f => f.type === 'INCOME').reduce((s, f) => s + f.amount, 0);
+    const shopExpense = activeFinances.filter(f => f.type === 'EXPENSE').reduce((s, f) => s + f.amount, 0);
+    const shopProfit = shopIncome - shopExpense;
 
-      return (
-          <div className="pb-32 animate-fade-in pt-4">
-              {/* Header & Shop Selector */}
-              <div className="flex items-center justify-between mb-8 px-1">
-                  <div>
-                      <h2 className="text-2xl font-black text-slate-800 tracking-tight">Cửa hàng</h2>
-                      <p className="text-sm font-bold text-slate-400 uppercase tracking-wider">Quản lý bán hàng</p>
-                  </div>
-                  <div className="bg-white border border-slate-200 py-2 px-4 rounded-2xl font-bold text-sm text-slate-700 shadow-sm flex items-center gap-2">
-                       <span className="material-symbols-rounded text-indigo-500">storefront</span>
-                       {shops.find(s => s.id === activeShop)?.name}
-                  </div>
-              </div>
+    const FINANCE_CATEGORIES = [
+      'Doanh thu trực tiếp', 'Doanh thu sàn TMĐT', 'Văn phòng phẩm', 'Vật tư đóng gói', 
+      'In ấn - Sản xuất', 'Tiền vận chuyển', 'Quảng cáo', 'Khác'
+    ];
 
-              {/* Action Tabs/Dashboard */}
-              <div className="bg-white rounded-[32px] p-2 shadow-xl shadow-slate-100 border border-slate-100 mb-8">
-                  <div className="grid grid-cols-3 gap-2">
-                      <button 
-                          onClick={() => setShopView('orders')} 
-                          className={`py-4 rounded-2xl flex flex-col items-center justify-center gap-2 active:scale-95 transition-all ${
-                              shopView === 'orders' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'text-slate-500 hover:bg-slate-50'
-                          }`}
-                      >
-                          <span className="material-symbols-rounded text-2xl">add_shopping_cart</span>
-                          <span className="font-bold text-[10px] uppercase">Đơn hàng</span>
-                      </button>
-                      <button 
-                          onClick={() => setShopView('inventory')} 
-                          className={`py-4 rounded-2xl flex flex-col items-center justify-center gap-2 active:scale-95 transition-all ${
-                              shopView === 'inventory' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'text-slate-500 hover:bg-slate-50'
-                          }`}
-                      >
-                          <span className="material-symbols-rounded text-2xl">inventory_2</span>
-                          <span className="font-bold text-[10px] uppercase">Kho hàng</span>
-                      </button>
-                      <button 
-                          onClick={() => setShopView('finance')} 
-                          className={`py-4 rounded-2xl flex flex-col items-center justify-center gap-2 active:scale-95 transition-all ${
-                              shopView === 'finance' ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200' : 'text-slate-500 hover:bg-slate-50'
-                          }`}
-                      >
-                          <span className="material-symbols-rounded text-2xl">account_balance_wallet</span>
-                          <span className="font-bold text-[10px] uppercase">Tài chính</span>
-                      </button>
-                  </div>
-              </div>
+    const handleAddFinance = async () => {
+      if (!finForm.amount || !finForm.desc) return alert('Vui lòng nhập đủ thông tin');
+      
+      const newFinance = {
+        id: Date.now().toString(),
+        shopId: activeShop,
+        type: finForm.type as 'INCOME' | 'EXPENSE',
+        amount: parseSmartAmount(finForm.amount),
+        description: finForm.desc,
+        category: finForm.category,
+        date: finForm.date.toISOString()
+      };
+      
+      try {
+        setIsLoading(true);
+        await supabaseService.addShopFinance(newFinance);
+        setShopFinances(prev => [newFinance, ...prev]);
+        setFinForm({ type: 'INCOME', amount: '', desc: '', category: 'Khác', date: new Date(), accountId: AccountType.MB });
+      } catch (error) {
+        console.error("Error adding finance:", error);
+        alert("Lỗi khi thêm giao dịch");
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-              {/* Placeholder for selected view */}
-              <div className="animate-in fade-in duration-300">
-                  {shopView === 'inventory' && renderShopInventory()}
-                  {shopView === 'orders' && renderShopOrders()}
-                  {shopView === 'finance' && renderShopFinance()}
-                  {shopView === 'overview' && renderShopFinance()}
-              </div>
+    return (
+      <div className="pb-28 pt-2 space-y-5">
+        {/* Shop Header */}
+        <div className="flex items-center justify-between px-1">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#86868b]">Kinh doanh</p>
+            <h2 className="text-2xl font-semibold tracking-tight text-[#1d1d1f]">Elank Studio</h2>
           </div>
-      );
+          <div className="bg-white border border-black/[0.06] py-1.5 px-3 rounded-full text-xs font-medium text-[#1d1d1f] shadow-sm flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-[#34c759]"></span>
+            <span>Đang mở</span>
+          </div>
+        </div>
+
+        {/* Apple Segmented View Switcher */}
+        <div className="bg-[#e5e5ea] p-1 rounded-full flex">
+          {(['finance', 'orders', 'inventory'] as const).map(view => (
+            <button
+              key={view}
+              onClick={() => setShopView(view)}
+              className={`flex-1 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                shopView === view 
+                  ? 'bg-white text-[#1d1d1f] shadow-sm' 
+                  : 'text-[#86868b] hover:text-[#1d1d1f]'
+              }`}
+            >
+              {view === 'finance' ? 'Tài chính' : view === 'orders' ? 'Đơn hàng' : 'Kho hàng'}
+            </button>
+          ))}
+        </div>
+
+        {/* Sub-view: Finance */}
+        {shopView === 'finance' && (
+          <div className="space-y-4">
+            {/* Profit Card */}
+            <div className="bg-gradient-to-br from-[#1c1c1e] to-[#000000] rounded-3xl p-6 text-white shadow-sm border border-white/10">
+              <p className="text-[11px] font-semibold text-[#86868b] uppercase tracking-wider mb-1">Lợi nhuận ròng</p>
+              <h3 className="text-3xl font-semibold tracking-tight text-white mb-4">{formatCurrency(shopProfit)}</h3>
+              
+              <div className="grid grid-cols-2 gap-3 pt-3 border-t border-white/10 text-xs">
+                <div>
+                  <span className="text-[#86868b] block mb-0.5">Tổng thu</span>
+                  <span className="font-semibold text-[#34c759]">{formatCurrency(shopIncome)}</span>
+                </div>
+                <div>
+                  <span className="text-[#86868b] block mb-0.5">Tổng chi</span>
+                  <span className="font-semibold text-[#ff3b30]">{formatCurrency(shopExpense)}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Add Finance Transaction */}
+            <div className="bg-white rounded-3xl p-5 border border-black/[0.05] shadow-[0_4px_24px_rgba(0,0,0,0.02)] space-y-3.5">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-[#86868b]">Ghi nhận thu / chi shop</p>
+              
+              <div className="flex bg-[#f5f5f7] p-1 rounded-full">
+                <button 
+                  onClick={() => setFinForm({...finForm, type: 'INCOME'})}
+                  className={`flex-1 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                    finForm.type === 'INCOME' ? 'bg-white text-[#34c759] shadow-sm' : 'text-[#86868b]'
+                  }`}
+                >
+                  Thu vào
+                </button>
+                <button 
+                  onClick={() => setFinForm({...finForm, type: 'EXPENSE'})}
+                  className={`flex-1 py-1.5 rounded-full text-xs font-semibold transition-all ${
+                    finForm.type === 'EXPENSE' ? 'bg-white text-[#ff3b30] shadow-sm' : 'text-[#86868b]'
+                  }`}
+                >
+                  Chi ra
+                </button>
+              </div>
+
+              <input 
+                type="text" 
+                placeholder="Số tiền (VNĐ)" 
+                value={finForm.amount} 
+                onChange={e => setFinForm({...finForm, amount: formatNumberInput(e.target.value)})}
+                className="w-full bg-[#f5f5f7] border border-black/[0.04] px-4 py-3 rounded-2xl text-sm font-semibold outline-none text-[#1d1d1f]"
+              />
+
+              <div className="grid grid-cols-2 gap-2">
+                <select 
+                  value={finForm.category} 
+                  onChange={e => setFinForm({...finForm, category: e.target.value})}
+                  className="w-full bg-[#f5f5f7] border border-black/[0.04] px-3.5 py-3 rounded-2xl text-xs font-medium outline-none text-[#1d1d1f]"
+                >
+                  {FINANCE_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <select 
+                  value={finForm.accountId} 
+                  onChange={e => setFinForm({...finForm, accountId: e.target.value as AccountType})}
+                  className="w-full bg-[#f5f5f7] border border-black/[0.04] px-3.5 py-3 rounded-2xl text-xs font-medium outline-none text-[#1d1d1f]"
+                >
+                  {accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                </select>
+              </div>
+
+              <input 
+                type="text" 
+                placeholder="Ghi chú giao dịch..." 
+                value={finForm.desc} 
+                onChange={e => setFinForm({...finForm, desc: e.target.value})}
+                className="w-full bg-[#f5f5f7] border border-black/[0.04] px-4 py-3 rounded-2xl text-sm outline-none text-[#1d1d1f] placeholder-[#86868b]/60"
+              />
+
+              <button 
+                onClick={handleAddFinance}
+                className="w-full py-3 bg-[#1d1d1f] hover:bg-black text-white font-medium rounded-full text-xs active:scale-[0.98] transition-all shadow-sm"
+              >
+                Lưu giao dịch shop
+              </button>
+            </div>
+
+            {/* Finance History List */}
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold text-[#86868b] uppercase tracking-wider px-2">Giao dịch gần đây</p>
+              {activeFinances.length === 0 ? (
+                <p className="text-center text-xs text-[#86868b] py-6">Chưa có giao dịch shop nào</p>
+              ) : (
+                <div className="bg-white rounded-2xl border border-black/[0.05] divide-y divide-black/[0.04] overflow-hidden">
+                  {activeFinances.slice(0, 15).map(f => (
+                    <div key={f.id} className="p-3.5 flex justify-between items-center text-xs">
+                      <div>
+                        <p className="font-semibold text-[#1d1d1f] text-xs">{f.description}</p>
+                        <p className="text-[10px] text-[#86868b] mt-0.5">{f.category} · {new Date(f.date).toLocaleDateString('vi-VN')}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`font-semibold ${f.type === 'INCOME' ? 'text-[#34c759]' : 'text-[#ff3b30]'}`}>
+                          {f.type === 'INCOME' ? '+' : '-'}{formatCurrency(f.amount)}
+                        </span>
+                        <button
+                          onClick={async () => {
+                            if (financeToDelete !== f.id) {
+                              setFinanceToDelete(f.id);
+                              return;
+                            }
+                            try {
+                              await supabaseService.deleteShopFinance(f.id);
+                              setShopFinances(prev => prev.filter(x => x.id !== f.id));
+                              setFinanceToDelete(null);
+                            } catch (e) {
+                              alert('Lỗi xoá giao dịch shop');
+                            }
+                          }}
+                          className={`p-1 rounded-full text-xs ${financeToDelete === f.id ? 'bg-[#ff3b30] text-white px-2' : 'text-[#86868b] hover:text-[#ff3b30]'}`}
+                        >
+                          {financeToDelete === f.id ? 'Xoá?' : <span className="material-symbols-rounded text-sm">delete</span>}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Sub-view: Orders */}
+        {shopView === 'orders' && (
+          <div className="space-y-4">
+            <div className="flex justify-between items-center px-1">
+              <p className="text-xs font-semibold text-[#86868b] uppercase">Đơn hàng ({orders.filter(o => o.shopId === activeShop).length})</p>
+              <button 
+                onClick={() => setOrderTab(orderTab === 'list' ? 'create' : 'list')}
+                className="text-xs font-medium text-[#1d1d1f] bg-white border border-black/[0.08] px-3 py-1.5 rounded-full shadow-sm"
+              >
+                {orderTab === 'list' ? '+ Tạo đơn' : 'Danh sách'}
+              </button>
+            </div>
+
+            {orderTab === 'create' ? (
+              <div className="bg-white rounded-3xl p-5 border border-black/[0.05] shadow-[0_4px_24px_rgba(0,0,0,0.02)] space-y-3">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-[#86868b]">Thông tin đơn hàng mới</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <input 
+                    type="text" 
+                    placeholder="Tên khách hàng" 
+                    value={ordForm.name} 
+                    onChange={e => setOrdForm({...ordForm, name: e.target.value})}
+                    className="w-full bg-[#f5f5f7] border border-black/[0.04] px-3.5 py-2.5 rounded-xl text-xs outline-none"
+                  />
+                  <select 
+                    value={ordForm.channel} 
+                    onChange={e => setOrdForm({...ordForm, channel: e.target.value})}
+                    className="w-full bg-[#f5f5f7] border border-black/[0.04] px-3.5 py-2.5 rounded-xl text-xs outline-none"
+                  >
+                    <option value="Shopee">Shopee</option>
+                    <option value="Facebook">Facebook</option>
+                    <option value="Instagram">Instagram</option>
+                    <option value="Zalo">Zalo</option>
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-[10px] font-semibold text-[#86868b] uppercase">Sản phẩm bán</p>
+                  {ordItems.map((it, idx) => (
+                    <div key={idx} className="flex gap-2">
+                      <select 
+                        value={it.productId} 
+                        onChange={e => setOrdItems(ordItems.map((x, i) => i === idx ? {...x, productId: e.target.value} : x))}
+                        className="flex-1 bg-[#f5f5f7] border border-black/[0.04] px-3 py-2 rounded-xl text-xs outline-none truncate"
+                      >
+                        <option value="">-- Chọn sản phẩm --</option>
+                        {products.filter(p => p.shopId === activeShop).map(p => (
+                          <option key={p.id} value={p.id}>{p.name} (Tồn: {p.stock})</option>
+                        ))}
+                      </select>
+                      <input 
+                        type="number" 
+                        placeholder="SL" 
+                        value={it.qty} 
+                        onChange={e => setOrdItems(ordItems.map((x, i) => i === idx ? {...x, qty: e.target.value} : x))}
+                        className="w-16 bg-[#f5f5f7] border border-black/[0.04] px-2 py-2 rounded-xl text-xs text-center outline-none"
+                      />
+                    </div>
+                  ))}
+                  <button 
+                    onClick={() => setOrdItems([...ordItems, { productId: '', qty: '1', price: '' }])}
+                    className="text-[11px] font-medium text-[#0071e3] hover:underline"
+                  >
+                    + Thêm sản phẩm
+                  </button>
+                </div>
+
+                <button 
+                  onClick={async () => {
+                    if (!ordForm.name) return alert('Vui lòng nhập tên khách hàng');
+                    const selected = ordItems.filter(i => i.productId);
+                    if (selected.length === 0) return alert('Vui lòng chọn ít nhất 1 sản phẩm');
+                    
+                    setIsLoading(true);
+                    try {
+                      let total = 0;
+                      const detail = selected.map(i => {
+                        const p = products.find(pp => pp.id === i.productId);
+                        const q = parseInt(i.qty) || 1;
+                        const price = Number(p?.sellingPrice) || 0;
+                        total += price * q;
+                        return { productId: i.productId, qty: q, unitPrice: price };
+                      });
+
+                      const newOrder = {
+                        id: Date.now().toString(),
+                        shopId: activeShop,
+                        channel: ordForm.channel,
+                        name: ordForm.name,
+                        phone: ordForm.phone,
+                        address: ordForm.address,
+                        productId: JSON.stringify(detail),
+                        qty: detail.reduce((s, d) => s + d.qty, 0),
+                        deposit: parseSmartAmount(ordForm.deposit) || 0,
+                        shipping: parseSmartAmount(ordForm.shipping) || 0,
+                        voucher: parseSmartAmount(ordForm.voucher) || 0,
+                        paymentFee: 0,
+                        status: 'Chưa Gửi Hàng',
+                        paymentMethod: 'Đang Thanh Toán',
+                        totalAmount: total,
+                        netRevenue: total,
+                        date: new Date().toISOString()
+                      };
+
+                      await supabaseService.addShopOrder(newOrder);
+                      setOrders([newOrder, ...orders]);
+                      alert('Tạo đơn hàng thành công!');
+                      setOrderTab('list');
+                    } catch (e) {
+                      alert('Lỗi tạo đơn hàng');
+                    } finally {
+                      setIsLoading(false);
+                    }
+                  }}
+                  className="w-full py-3 bg-[#1d1d1f] hover:bg-black text-white font-medium rounded-full text-xs active:scale-[0.98] transition-all"
+                >
+                  Tạo đơn hàng
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {orders.filter(o => o.shopId === activeShop).map(order => (
+                  <div key={order.id} className="bg-white p-4 rounded-2xl border border-black/[0.05] text-xs space-y-1.5 shadow-[0_2px_12px_rgba(0,0,0,0.02)]">
+                    <div className="flex justify-between items-center">
+                      <span className="font-semibold text-[#1d1d1f]">{order.name}</span>
+                      <span className="text-[10px] bg-[#f5f5f7] px-2 py-0.5 rounded-full font-medium text-[#86868b]">{order.channel}</span>
+                    </div>
+                    <div className="flex justify-between text-[#86868b] text-[11px]">
+                      <span>{new Date(order.date).toLocaleDateString('vi-VN')}</span>
+                      <span className="font-semibold text-[#1d1d1f]">{formatCurrency(order.totalAmount || 0)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Sub-view: Inventory */}
+        {shopView === 'inventory' && (
+          <div className="space-y-4">
+            <div className="bg-white rounded-3xl p-5 border border-black/[0.05] shadow-[0_4px_24px_rgba(0,0,0,0.02)] space-y-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-[#86868b]">Nhập hàng mới</p>
+              <input 
+                type="text" 
+                placeholder="Tên sản phẩm" 
+                value={invForm.name} 
+                onChange={e => setInvForm({...invForm, name: e.target.value})}
+                className="w-full bg-[#f5f5f7] border border-black/[0.04] px-3.5 py-2.5 rounded-xl text-xs outline-none"
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <input 
+                  type="text" 
+                  placeholder="Giá nhập gốc" 
+                  value={invForm.originalPrice} 
+                  onChange={e => setInvForm({...invForm, originalPrice: formatNumberInput(e.target.value)})}
+                  className="w-full bg-[#f5f5f7] border border-black/[0.04] px-3.5 py-2.5 rounded-xl text-xs outline-none"
+                />
+                <input 
+                  type="text" 
+                  placeholder="Giá bán niêm yết" 
+                  value={invForm.sellingPrice} 
+                  onChange={e => setInvForm({...invForm, sellingPrice: formatNumberInput(e.target.value)})}
+                  className="w-full bg-[#f5f5f7] border border-black/[0.04] px-3.5 py-2.5 rounded-xl text-xs outline-none"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <input 
+                  type="number" 
+                  placeholder="Số lượng" 
+                  value={invForm.stock} 
+                  onChange={e => setInvForm({...invForm, stock: e.target.value})}
+                  className="w-full bg-[#f5f5f7] border border-black/[0.04] px-3.5 py-2.5 rounded-xl text-xs outline-none"
+                />
+                <button 
+                  onClick={async () => {
+                    if (!invForm.name || !invForm.originalPrice || !invForm.sellingPrice) return alert('Vui lòng nhập đủ thông tin');
+                    setIsLoading(true);
+                    const newProd = {
+                      id: Date.now().toString(),
+                      shopId: activeShop,
+                      name: invForm.name,
+                      originalPrice: parseSmartAmount(invForm.originalPrice),
+                      sellingPrice: parseSmartAmount(invForm.sellingPrice),
+                      stock: parseInt(invForm.stock) || 0,
+                      importDate: new Date().toISOString()
+                    };
+                    try {
+                      await supabaseService.addShopProduct(newProd);
+                      setProducts([newProd, ...products]);
+                      setInvForm({ name: '', originalPrice: '', sellingPrice: '', stock: '1', date: new Date(), accountId: AccountType.MB });
+                      alert('Thêm sản phẩm thành công!');
+                    } catch (e) {
+                      alert('Lỗi thêm sản phẩm');
+                    } finally {
+                      setIsLoading(false);
+                    }
+                  }}
+                  className="w-full py-2.5 bg-[#1d1d1f] hover:bg-black text-white font-medium rounded-xl text-xs active:scale-[0.98] transition-all"
+                >
+                  + Thêm kho
+                </button>
+              </div>
+            </div>
+
+            {/* Product List */}
+            <div className="space-y-2">
+              <p className="text-[11px] font-semibold text-[#86868b] uppercase tracking-wider px-2">Danh sách kho hàng ({products.filter(p => p.shopId === activeShop).length})</p>
+              <div className="bg-white rounded-2xl border border-black/[0.05] divide-y divide-black/[0.04] overflow-hidden">
+                {products.filter(p => p.shopId === activeShop).map(p => (
+                  <div key={p.id} className="p-3.5 flex justify-between items-center text-xs">
+                    <div>
+                      <p className="font-semibold text-[#1d1d1f]">{p.name}</p>
+                      <p className="text-[10px] text-[#86868b] mt-0.5">Vốn: {formatCurrency(p.originalPrice)} · Bán: {formatCurrency(p.sellingPrice)}</p>
+                    </div>
+                    <span className="font-semibold text-xs px-2.5 py-1 bg-[#f5f5f7] rounded-full text-[#1d1d1f]">
+                      Tồn: {p.stock}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
   };
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC] font-sans text-slate-900 selection:bg-indigo-100">
-      <main className="max-w-md mx-auto min-h-screen relative bg-[#F8FAFC] shadow-2xl overflow-hidden pb-safe">
+    <div className="min-h-screen bg-[#f5f5f7] font-sans text-[#1d1d1f] selection:bg-black/10">
+      <main className="max-w-md mx-auto min-h-screen relative bg-[#f5f5f7] shadow-sm overflow-hidden px-4 pt-safe pb-safe">
+        
+        {/* Loading Overlay */}
         <AnimatePresence>
             {isLoading && (
                 <motion.div 
                     initial={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
-                    transition={{ duration: 0.5 }}
-                    className="fixed inset-0 bg-white z-[100] flex flex-col items-center justify-center p-8 overflow-hidden"
+                    transition={{ duration: 0.3 }}
+                    className="fixed inset-0 bg-white/90 backdrop-blur-xl z-[100] flex flex-col items-center justify-center p-8"
                 >
-                    {/* Background decorative elements */}
-                    <div className="absolute top-[-10%] right-[-10%] w-64 h-64 bg-indigo-50 rounded-full blur-3xl opacity-60"></div>
-                    <div className="absolute bottom-[-10%] left-[-10%] w-64 h-64 bg-rose-50 rounded-full blur-3xl opacity-60"></div>
-                    
-                    <div className="relative flex flex-col items-center">
-                        <motion.div
-                            animate={{ 
-                                scale: [1, 1.1, 1],
-                                rotate: [0, 5, -5, 0]
-                            }}
-                            transition={{ 
-                                duration: 3,
-                                repeat: Infinity,
-                                ease: "easeInOut"
-                            }}
-                            className="w-24 h-24 bg-gradient-to-tr from-indigo-600 to-indigo-400 rounded-[32px] flex items-center justify-center shadow-2xl shadow-indigo-200 mb-8"
-                        >
-                            <span className="material-symbols-rounded text-5xl text-white fill-1">savings</span>
-                        </motion.div>
-                        
-                        <motion.h1 
-                            initial={{ y: 20, opacity: 0 }}
-                            animate={{ y: 0, opacity: 1 }}
-                            transition={{ delay: 0.2 }}
-                            className="text-2xl font-black text-slate-800 tracking-tight mb-2"
-                        >
-                            Mèo Finance
-                        </motion.h1>
-                        
-                        <motion.p 
-                            initial={{ y: 20, opacity: 0 }}
-                            animate={{ y: 0, opacity: 1 }}
-                            transition={{ delay: 0.3 }}
-                            className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-12"
-                        >
-                            Quản lý tài chính thông minh
-                        </motion.p>
-                        
-                        <motion.div 
-                            initial={{ scale: 0.8, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            transition={{ delay: 0.5 }}
-                            className="flex flex-col items-center gap-4"
-                        >
-                            <div className="w-48 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                                <motion.div 
-                                    initial={{ width: "0%" }}
-                                    animate={{ width: "100%" }}
-                                    transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
-                                    className="h-full bg-indigo-600 rounded-full"
-                                />
-                            </div>
-                            <p className="text-xs font-bold text-indigo-600 animate-pulse tracking-wide uppercase">Đang đồng bộ dữ liệu...</p>
-                        </motion.div>
-                    </div>
-                    
-                    <div className="absolute bottom-12 text-slate-300 font-bold text-[10px] tracking-[4px] uppercase">
-                        Version 2.0 • Elank Studio
-                    </div>
+                    <div className="w-12 h-12 rounded-full border-2 border-black/15 border-t-black animate-spin mb-4"></div>
+                    <p className="text-xs font-semibold tracking-wider uppercase text-[#86868b]">Mèo Finance</p>
                 </motion.div>
             )}
         </AnimatePresence>
         
-        {/* Error State Overlay */}
+        {/* Error State */}
         {configError && !isLoading && (
-             <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                className="fixed inset-0 bg-white z-[110] flex flex-col items-center justify-center p-8 text-center"
-             >
-                <div className="w-20 h-20 bg-rose-50 text-rose-500 rounded-[24px] flex items-center justify-center mb-6 border border-rose-100">
-                    <span className="material-symbols-rounded text-4xl">cloud_off</span>
-                </div>
-                
-                <h3 className="text-xl font-black text-slate-800 mb-2">Lỗi kết nối</h3>
-                <p className="text-slate-500 text-sm mb-8 leading-relaxed">{configError}</p>
-                
-                <div className="w-full bg-slate-50 p-4 rounded-2xl border border-slate-100 text-left mb-8">
-                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 px-1">Tệp yêu cầu kiểm tra</p>
-                    <div className="font-mono text-xs text-indigo-600 bg-white p-3 rounded-xl border border-slate-100 shadow-sm overflow-x-auto">
-                        supabaseClient.ts
-                    </div>
-                </div>
-                
-                <p className="text-xs text-slate-400 font-medium">Vui lòng cập nhật URL và Key trong code để tiếp tục.</p>
-                
+             <div className="fixed inset-0 bg-white z-[110] flex flex-col items-center justify-center p-8 text-center">
+                <span className="material-symbols-rounded text-4xl text-[#ff3b30] mb-3">cloud_off</span>
+                <h3 className="text-lg font-semibold text-[#1d1d1f] mb-1">Không thể tải dữ liệu</h3>
+                <p className="text-xs text-[#86868b] mb-6">{configError}</p>
                 <button 
                     onClick={() => window.location.reload()}
-                    className="mt-8 px-8 py-3 bg-slate-900 text-white font-bold rounded-full text-sm active:scale-95 transition-all shadow-xl shadow-slate-200"
+                    className="px-6 py-2.5 bg-[#1d1d1f] text-white font-medium rounded-full text-xs active:scale-95 transition-all"
                 >
-                    Thử lại ngay
+                    Thử lại
                 </button>
-             </motion.div>
+             </div>
         )}
 
-        <div className="px-4 pt-safe relative min-h-screen">
-          <AnimatePresence mode="wait">
-              {activeTab === 'home' && (
-                  <motion.div
-                      key="home"
-                      initial={{ opacity: 0, x: -20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: -20 }}
-                      transition={{ duration: 0.2, ease: "easeInOut" }}
-                  >
-                      {renderHome()}
-                  </motion.div>
-              )}
-              {activeTab === 'history' && (
-                  <motion.div
-                      key="history"
-                      initial={{ opacity: 0, x: 20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: 20 }}
-                      transition={{ duration: 0.2, ease: "easeInOut" }}
-                  >
-                      {renderHistory()}
-                  </motion.div>
-              )}
-              {activeTab === 'piggy' && (
-                  <motion.div
-                      key="piggy"
-                      initial={{ opacity: 0, x: 20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: 20 }}
-                      transition={{ duration: 0.2, ease: "easeInOut" }}
-                  >
-                      {renderPiggy()}
-                  </motion.div>
-              )}
-              {activeTab === 'shop' && (
-                  <motion.div
-                      key="shop"
-                      initial={{ opacity: 0, x: 20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: 20 }}
-                      transition={{ duration: 0.2, ease: "easeInOut" }}
-                  >
-                      {renderShop()}
-                  </motion.div>
-              )}
-              {activeTab === 'gold' && (
-                  <motion.div
-                      key="gold"
-                      initial={{ opacity: 0, x: 20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      exit={{ opacity: 0, x: 20 }}
-                      transition={{ duration: 0.2, ease: "easeInOut" }}
-                  >
-                      {renderGold()}
-                  </motion.div>
-              )}
-          </AnimatePresence>
-        </div>
+        {/* Tab Views */}
+        <AnimatePresence mode="wait">
+            {activeTab === 'home' && (
+                <motion.div
+                    key="home"
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.15 }}
+                >
+                    {renderHome()}
+                </motion.div>
+            )}
+            {activeTab === 'history' && (
+                <motion.div
+                    key="history"
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.15 }}
+                >
+                    {renderHistory()}
+                </motion.div>
+            )}
+            {activeTab === 'shop' && (
+                <motion.div
+                    key="shop"
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -6 }}
+                    transition={{ duration: 0.15 }}
+                >
+                    {renderShop()}
+                </motion.div>
+            )}
+        </AnimatePresence>
 
-        {/* Floating Bottom Nav */}
-        <div className="fixed bottom-6 left-0 right-0 z-40 px-4 pointer-events-none">
-            <div className="bg-white/90 backdrop-blur-2xl px-6 py-3 rounded-[32px] shadow-[0_20px_50px_rgba(0,0,0,0.1)] border border-slate-200/50 max-w-sm mx-auto flex justify-between items-center pointer-events-auto relative overflow-hidden">
-                {/* Subtle top gloss */}
-                <div className="absolute top-0 left-0 right-0 h-[1px] bg-gradient-to-r from-transparent via-slate-200 to-transparent"></div>
-                
+        {/* Apple iOS Floating Bottom Dock (3 tabs: Ví tiền, Lịch sử, Cửa hàng) */}
+        <div className="fixed bottom-5 left-0 right-0 z-40 px-4 pointer-events-none">
+            <div className="bg-white/85 backdrop-blur-2xl px-3 py-2 rounded-full shadow-[0_12px_40px_rgba(0,0,0,0.08)] border border-black/[0.08] max-w-[280px] mx-auto flex justify-between items-center pointer-events-auto">
                 <button 
                     onClick={() => setActiveTab('home')}
-                    className={`flex-1 flex flex-col items-center justify-center transition-all active:scale-95 duration-300 ${activeTab === 'home' ? 'text-indigo-600' : 'text-slate-400'}`}
+                    className={`flex-1 py-1.5 px-3 rounded-full flex flex-col items-center justify-center transition-all active:scale-95 duration-200 ${
+                      activeTab === 'home' ? 'text-[#1d1d1f] bg-black/[0.06] font-semibold' : 'text-[#86868b] hover:text-[#1d1d1f]'
+                    }`}
                 >
-                    <span className={`material-symbols-rounded text-[28px] ${activeTab === 'home' ? 'fill-1' : ''}`}>home</span>
-                    <div className="h-1.5 flex items-center justify-center mt-1">
-                        {activeTab === 'home' && <motion.div layoutId="nav-dot" className="w-1.5 h-1.5 bg-indigo-600 rounded-full" />}
-                    </div>
+                    <span className="material-symbols-rounded text-xl">account_balance_wallet</span>
+                    <span className="text-[10px] mt-0.5 tracking-tight">Ví tiền</span>
                 </button>
 
                 <button 
                     onClick={() => setActiveTab('history')}
-                    className={`flex-1 flex flex-col items-center justify-center transition-all active:scale-95 duration-300 ${activeTab === 'history' ? 'text-indigo-600' : 'text-slate-400'}`}
+                    className={`flex-1 py-1.5 px-3 rounded-full flex flex-col items-center justify-center transition-all active:scale-95 duration-200 ${
+                      activeTab === 'history' ? 'text-[#1d1d1f] bg-black/[0.06] font-semibold' : 'text-[#86868b] hover:text-[#1d1d1f]'
+                    }`}
                 >
-                    <span className={`material-symbols-rounded text-[28px] ${activeTab === 'history' ? 'fill-1' : ''}`}>calendar_month</span>
-                    <div className="h-1.5 flex items-center justify-center mt-1">
-                        {activeTab === 'history' && <motion.div layoutId="nav-dot" className="w-1.5 h-1.5 bg-indigo-600 rounded-full" />}
-                    </div>
+                    <span className="material-symbols-rounded text-xl">receipt_long</span>
+                    <span className="text-[10px] mt-0.5 tracking-tight">Lịch sử</span>
                 </button>
 
-                {/* Centered Large Button */}
                 <button 
                     onClick={() => setActiveTab('shop')}
-                    className={`flex-none flex flex-col items-center justify-center w-14 h-14 rounded-full transition-all active:scale-90 shadow-lg -mt-2 -mb-2 border-4 border-white ${activeTab === 'shop' ? 'bg-indigo-600 text-white shadow-indigo-200' : 'bg-slate-100 text-slate-400 shadow-slate-100'}`}
+                    className={`flex-1 py-1.5 px-3 rounded-full flex flex-col items-center justify-center transition-all active:scale-95 duration-200 ${
+                      activeTab === 'shop' ? 'text-[#1d1d1f] bg-black/[0.06] font-semibold' : 'text-[#86868b] hover:text-[#1d1d1f]'
+                    }`}
                 >
-                    <span className={`material-symbols-rounded text-[30px] ${activeTab === 'shop' ? 'fill-1' : ''}`}>storefront</span>
-                </button>
-
-                <button 
-                    onClick={() => setActiveTab('piggy')}
-                    className={`flex-1 flex flex-col items-center justify-center transition-all active:scale-95 duration-300 ${activeTab === 'piggy' ? 'text-indigo-600' : 'text-slate-400'}`}
-                >
-                    <span className={`material-symbols-rounded text-[28px] ${activeTab === 'piggy' ? 'fill-1' : ''}`}>savings</span>
-                    <div className="h-1.5 flex items-center justify-center mt-1">
-                        {activeTab === 'piggy' && <motion.div layoutId="nav-dot" className="w-1.5 h-1.5 bg-indigo-600 rounded-full" />}
-                    </div>
-                </button>
-
-                <button 
-                    onClick={() => setActiveTab('gold')}
-                    className={`flex-1 flex flex-col items-center justify-center transition-all active:scale-95 duration-300 ${activeTab === 'gold' ? 'text-indigo-600' : 'text-slate-400'}`}
-                >
-                    <span className={`material-symbols-rounded text-[28px] ${activeTab === 'gold' ? 'fill-1' : ''}`}>payments</span>
-                    <div className="h-1.5 flex items-center justify-center mt-1">
-                        {activeTab === 'gold' && <motion.div layoutId="nav-dot" className="w-1.5 h-1.5 bg-indigo-600 rounded-full" />}
-                    </div>
+                    <span className="material-symbols-rounded text-xl">storefront</span>
+                    <span className="text-[10px] mt-0.5 tracking-tight">Cửa hàng</span>
                 </button>
             </div>
         </div>
 
-        {/* Transfer Bottom Sheet */}
+        {/* Transfer Modal with Amount Suggestions */}
         {showTransfer && (
             <div className="fixed inset-0 z-50 flex items-end justify-center">
                 <div className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" onClick={() => setShowTransfer(false)}></div>
-                <div className="bg-white w-full max-w-md rounded-t-[32px] p-6 shadow-2xl animate-slide-up relative z-10 pb-[calc(env(safe-area-inset-bottom)+2rem)]">
-                    <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-8"></div>
+                <div className="bg-white w-full max-w-md rounded-t-[32px] p-6 shadow-2xl relative z-10 pb-[calc(env(safe-area-inset-bottom)+2rem)] animate-slide-up border-t border-black/[0.06]">
+                    <div className="w-10 h-1 bg-black/15 rounded-full mx-auto mb-6"></div>
                     
-                    <h3 className="text-xl font-bold mb-6 flex items-center gap-2 text-slate-800">
-                        <span className="p-2 bg-indigo-50 text-indigo-600 rounded-full">
-                           <span className="material-symbols-rounded block">swap_horiz</span>
-                        </span>
-                        Chuyển tiền nội bộ
-                    </h3>
+                    <h3 className="text-lg font-semibold mb-5 text-[#1d1d1f]">Chuyển tiền nội bộ</h3>
                     
-                    <div className="space-y-6">
-                        <div className="flex items-center gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-100">
-                            <div className="flex-1">
-                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Từ ví</label>
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-3 bg-[#f5f5f7] p-3.5 rounded-2xl border border-black/[0.04]">
+                            <div>
+                                <label className="text-[10px] text-[#86868b] font-semibold uppercase mb-1 block">Từ ví</label>
                                 <select 
                                     value={transferFrom} 
                                     onChange={(e) => setTransferFrom(e.target.value as AccountType)}
-                                    className="w-full bg-transparent font-bold text-slate-700 outline-none"
+                                    className="w-full bg-transparent font-semibold text-xs text-[#1d1d1f] outline-none"
                                 >
-                                    {accounts.map(acc => (
+                                    {accounts.filter(a => a.id !== AccountType.TET_SAVING).map(acc => (
                                         <option key={acc.id} value={acc.id}>{acc.name}</option>
                                     ))}
                                 </select>
                             </div>
-                            <span className="material-symbols-rounded text-slate-300">arrow_forward</span>
-                            <div className="flex-1 text-right">
-                                <label className="text-[10px] text-slate-400 font-bold uppercase mb-1 block">Đến ví</label>
+                            <div className="text-right">
+                                <label className="text-[10px] text-[#86868b] font-semibold uppercase mb-1 block">Đến ví</label>
                                 <select 
                                     value={transferTo} 
                                     onChange={(e) => setTransferTo(e.target.value as AccountType)}
-                                    className="w-full bg-transparent font-bold text-indigo-600 outline-none text-right"
+                                    className="w-full bg-transparent font-semibold text-xs text-[#0071e3] outline-none text-right"
                                 >
-                                    {accounts.map(acc => (
+                                    {accounts.filter(a => a.id !== AccountType.TET_SAVING).map(acc => (
                                         <option key={acc.id} value={acc.id} disabled={acc.id === transferFrom}>{acc.name}</option>
                                     ))}
                                 </select>
@@ -4464,26 +1648,38 @@ export default function App() {
                         </div>
 
                         <div>
-                            <label className="text-sm font-medium text-slate-600 mb-2 block">Nhập số tiền</label>
+                            <label className="text-xs font-semibold text-[#86868b] uppercase tracking-wider mb-1.5 block">Nhập số tiền</label>
                             <input 
                                 type="text"
                                 inputMode="numeric"
                                 value={transferAmount}
                                 onChange={(e) => setTransferAmount(formatNumberInput(e.target.value))}
-                                placeholder="VD: 500"
-                                className="w-full bg-slate-50 border-b-2 border-indigo-100 px-4 py-3 text-2xl font-bold text-slate-800 outline-none focus:border-indigo-500 transition-colors"
+                                placeholder="0"
+                                className="w-full bg-[#f5f5f7] border border-black/[0.06] rounded-2xl px-4 py-3.5 text-2xl font-semibold text-[#1d1d1f] outline-none focus:border-[#1d1d1f]"
                             />
-                            {transferAmount && (
-                                <p className="text-xs text-indigo-500 mt-2 font-medium">
-                                    Sẽ chuyển: {formatCurrency(parseSmartAmount(transferAmount))}
-                                </p>
-                            )}
+                            {/* Suggestions in Transfer */}
+                            <div className="flex items-center justify-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-1 mt-2.5 flex-wrap">
+                              {getAmountSuggestions(transferAmount).map((sugg) => (
+                                <button
+                                  key={sugg}
+                                  type="button"
+                                  onClick={() => setTransferAmount(formatNumberInput(sugg.toString()))}
+                                  className={`px-3 py-1 rounded-full text-xs font-semibold transition-all active:scale-95 border ${
+                                    parseSmartAmount(transferAmount) === sugg
+                                      ? 'bg-[#1d1d1f] text-white border-[#1d1d1f] shadow-sm'
+                                      : 'bg-[#f5f5f7] hover:bg-[#e8e8ed] text-[#1d1d1f] border-black/[0.04]'
+                                  }`}
+                                >
+                                  {formatCurrency(sugg)}
+                                </button>
+                              ))}
+                            </div>
                         </div>
 
                         <button 
                             onClick={handleTransfer}
                             disabled={!transferAmount || transferFrom === transferTo}
-                            className="w-full py-4 bg-indigo-600 text-white font-bold rounded-2xl shadow-lg shadow-indigo-200 disabled:opacity-50 disabled:shadow-none active:scale-95 transition-all mt-4"
+                            className="w-full py-3.5 bg-[#1d1d1f] hover:bg-black text-white font-medium rounded-full text-sm active:scale-[0.98] transition-all disabled:opacity-40"
                         >
                             Xác nhận chuyển
                         </button>
@@ -4492,7 +1688,16 @@ export default function App() {
             </div>
         )}
 
-        {/* Bill Modal (Creation) */}
+        {/* QR Scanner & Transfer Modal */}
+        <QRScannerModal
+            isOpen={showQRScanner}
+            onClose={() => setShowQRScanner(false)}
+            onLogTransaction={handleLogQRTransfer}
+            getAmountSuggestions={getAmountSuggestions}
+            formatCurrency={formatCurrency}
+        />
+
+        {/* Bill Modal (Creation & History) */}
         {showBill && (
             <BillGenerator 
                 transactions={transactions} 
@@ -4500,43 +1705,37 @@ export default function App() {
                 onSettle={handleSettleDebts}
             />
         )}
-
-        {/* Bill Modal (Viewing History) */}
         {viewingBill && (
             <BillGenerator 
                 transactions={viewingBill.transactions} 
                 onClose={() => setViewingBill(null)} 
-                onSettle={() => {}} // No-op for historical view
+                onSettle={() => {}}
                 isHistorical={true}
                 historicalDate={viewingBill.date}
                 historicalTotalPaid={viewingBill.totalPaid}
             />
         )}
 
-        {/* Delete Confirmation Modal */}
+        {/* Delete Modal */}
         {deletingTx && (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pt-safe pb-safe">
-                <div className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" onClick={() => setDeletingTx(null)}></div>
-                <div className="bg-white w-full max-w-sm rounded-[32px] p-6 shadow-2xl relative z-10 animate-scale-up">
-                    <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-8"></div>
-                    <div className="w-12 h-12 rounded-full bg-rose-100 text-rose-500 flex items-center justify-center mb-4 mx-auto">
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+                <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setDeletingTx(null)}></div>
+                <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative z-10 text-center border border-black/[0.06]">
+                    <div className="w-12 h-12 rounded-full bg-[#ff3b30]/10 text-[#ff3b30] flex items-center justify-center mb-3 mx-auto">
                         <span className="material-symbols-rounded text-2xl">delete</span>
                     </div>
-                    <h3 className="text-xl font-bold text-center text-slate-800 mb-2">Xoá giao dịch?</h3>
-                    <p className="text-center text-slate-500 mb-8 text-sm leading-relaxed">
-                        Bạn có chắc muốn xoá <span className="font-bold text-slate-700">"{deletingTx.description}"</span>? 
-                        <br/>Số dư tài khoản sẽ được hoàn lại.
-                    </p>
-                    <div className="flex gap-3">
+                    <h3 className="text-base font-semibold text-[#1d1d1f] mb-1">Xoá giao dịch?</h3>
+                    <p className="text-xs text-[#86868b] mb-6">"{deletingTx.description}" sẽ được xoá và số dư ví sẽ được hoàn lại.</p>
+                    <div className="flex gap-2">
                         <button 
                             onClick={() => setDeletingTx(null)}
-                            className="flex-1 py-3.5 bg-slate-100 text-slate-700 font-bold rounded-2xl hover:bg-slate-200 active:scale-95 transition-all"
+                            className="flex-1 py-2.5 bg-[#f5f5f7] text-[#1d1d1f] font-medium rounded-full text-xs"
                         >
                             Hủy
                         </button>
                         <button 
                             onClick={confirmDelete}
-                            className="flex-1 py-3.5 bg-rose-500 text-white font-bold rounded-2xl shadow-lg shadow-rose-200 hover:bg-rose-600 active:scale-95 transition-all"
+                            className="flex-1 py-2.5 bg-[#ff3b30] text-white font-medium rounded-full text-xs shadow-sm"
                         >
                             Xoá ngay
                         </button>
@@ -4544,69 +1743,64 @@ export default function App() {
                 </div>
             </div>
         )}
-        {/* Edit Transaction Modal */}
+
+        {/* Edit Modal with Suggestions */}
         {editingTx && (
             <div className="fixed inset-0 z-50 flex items-end justify-center">
-                <div className="absolute inset-0 bg-black/40 backdrop-blur-sm transition-opacity" onClick={() => setEditingTx(null)}></div>
-                <div className="bg-white w-full max-w-md rounded-t-[32px] p-6 shadow-2xl animate-slide-up relative z-10 pb-[calc(env(safe-area-inset-bottom)+2rem)]">
-                    <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-8"></div>
+                <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setEditingTx(null)}></div>
+                <div className="bg-white w-full max-w-md rounded-t-[32px] p-6 shadow-2xl relative z-10 pb-[calc(env(safe-area-inset-bottom)+2rem)] animate-slide-up border-t border-black/[0.06]">
+                    <div className="w-10 h-1 bg-black/15 rounded-full mx-auto mb-6"></div>
+                    <h3 className="text-base font-semibold mb-4 text-[#1d1d1f]">Chỉnh sửa giao dịch</h3>
                     
-                    <h3 className="text-xl font-bold mb-6 flex items-center gap-2 text-slate-800">
-                        <span className="p-2 bg-blue-50 text-blue-600 rounded-full">
-                           <span className="material-symbols-rounded block">edit</span>
-                        </span>
-                        Sửa giao dịch
-                    </h3>
-                    
-                    <div className="space-y-5">
+                    <div className="space-y-4">
                         <div>
-                            <label className="text-sm font-medium text-slate-600 mb-2 block">Số tiền</label>
+                            <label className="text-xs font-semibold text-[#86868b] uppercase tracking-wider mb-1 block">Số tiền</label>
                             <input 
                                 type="text"
                                 inputMode="numeric"
                                 value={editAmount}
                                 onChange={(e) => setEditAmount(formatNumberInput(e.target.value))}
-                                className="w-full bg-slate-50 border-b-2 border-slate-200 px-4 py-3 text-2xl font-bold text-slate-800 outline-none focus:border-blue-500 transition-colors"
+                                className="w-full bg-[#f5f5f7] border border-black/[0.06] rounded-2xl px-4 py-3 text-xl font-semibold text-[#1d1d1f] outline-none"
                             />
-                        </div>
-
-                        <div>
-                            <label className="text-sm font-medium text-slate-600 mb-2 block">Ngày giao dịch</label>
-                            <div className="w-full bg-slate-50 border-b-2 border-slate-200 px-4 py-3 text-lg font-bold text-slate-800 outline-none focus-within:border-blue-500 transition-colors flex items-center gap-2">
-                                <span className="material-symbols-rounded text-slate-400">calendar_month</span>
-                                <DatePicker 
-                                    selected={editDate} 
-                                    onChange={(date: Date | null) => date && setEditDate(date)} 
-                                    dateFormat="dd/MM/yyyy"
-                                    locale={vi}
-                                    formatWeekDay={formatShortWeekday}
-                                    className="w-full outline-none bg-transparent cursor-pointer"
-                                    wrapperClassName="flex-1"
-                                />
+                            {/* Suggestions in Edit */}
+                            <div className="flex items-center justify-center gap-1.5 overflow-x-auto no-scrollbar py-1 px-1 mt-2.5 flex-wrap">
+                              {getAmountSuggestions(editAmount).map((sugg) => (
+                                <button
+                                  key={sugg}
+                                  type="button"
+                                  onClick={() => setEditAmount(formatNumberInput(sugg.toString()))}
+                                  className={`px-3 py-1 rounded-full text-xs font-semibold transition-all active:scale-95 border ${
+                                    parseSmartAmount(editAmount) === sugg
+                                      ? 'bg-[#1d1d1f] text-white border-[#1d1d1f] shadow-sm'
+                                      : 'bg-[#f5f5f7] hover:bg-[#e8e8ed] text-[#1d1d1f] border-black/[0.04]'
+                                  }`}
+                                >
+                                  {formatCurrency(sugg)}
+                                </button>
+                              ))}
                             </div>
                         </div>
 
                         <div>
-                            <label className="text-sm font-medium text-slate-600 mb-2 block">Nội dung</label>
+                            <label className="text-xs font-semibold text-[#86868b] uppercase tracking-wider mb-1 block">Nội dung</label>
                             <input 
                                 type="text"
                                 value={editDesc}
                                 onChange={(e) => setEditDesc(e.target.value)}
-                                className="w-full bg-slate-50 border-b-2 border-slate-200 px-4 py-3 text-lg font-bold text-slate-800 outline-none focus:border-blue-500 transition-colors"
+                                className="w-full bg-[#f5f5f7] border border-black/[0.06] rounded-2xl px-4 py-3 text-sm font-medium text-[#1d1d1f] outline-none"
                             />
                         </div>
 
-                        <div className="flex gap-3 mt-8">
+                        <div className="flex gap-2 pt-2">
                             <button 
                                 onClick={() => setEditingTx(null)}
-                                className="flex-1 py-4 bg-slate-100 text-slate-700 font-bold rounded-2xl hover:bg-slate-200 active:scale-95 transition-all"
+                                className="flex-1 py-3 bg-[#f5f5f7] text-[#1d1d1f] font-medium rounded-full text-xs"
                             >
                                 Hủy
                             </button>
                             <button 
                                 onClick={confirmEdit}
-                                disabled={!editAmount || !editDesc.trim()}
-                                className="flex-1 py-4 bg-blue-600 text-white font-bold rounded-2xl shadow-lg shadow-blue-200 hover:bg-blue-700 disabled:opacity-50 disabled:shadow-none active:scale-95 transition-all"
+                                className="flex-1 py-3 bg-[#1d1d1f] text-white font-medium rounded-full text-xs shadow-sm"
                             >
                                 Lưu thay đổi
                             </button>
@@ -4623,56 +1817,7 @@ export default function App() {
             to { transform: translateY(0); }
         }
         .animate-slide-up {
-            animation: slide-up 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-        @keyframes scale-up {
-            from { transform: scale(0.9); opacity: 0; }
-            to { transform: scale(1); opacity: 1; }
-        }
-        .animate-scale-up {
-            animation: scale-up 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-        .ease-spring {
-            transition-timing-function: cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        }
-        
-        /* React DatePicker Custom Styles */
-        .react-datepicker-wrapper {
-            width: 100%;
-        }
-        .react-datepicker {
-            font-family: inherit;
-            border-radius: 1rem;
-            border: 1px solid #e2e8f0;
-            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-        }
-        .react-datepicker__header {
-            background-color: white;
-            border-bottom: 1px solid #e2e8f0;
-            border-top-left-radius: 1rem !important;
-            border-top-right-radius: 1rem !important;
-            padding-top: 1rem;
-        }
-        .react-datepicker__day-name, .react-datepicker__day, .react-datepicker__time-name {
-            width: 2.2rem;
-            line-height: 2.2rem;
-            margin: 0.15rem;
-            font-weight: 500;
-        }
-        .react-datepicker__day--selected {
-            background-color: #4f46e5 !important;
-            border-radius: 0.5rem;
-            color: white !important;
-        }
-        .react-datepicker__day--keyboard-selected {
-            background-color: #818cf8 !important;
-            border-radius: 0.5rem;
-            color: white !important;
-        }
-        .react-datepicker__current-month {
-            font-weight: 700;
-            font-size: 1.1rem;
-            margin-bottom: 0.5rem;
+            animation: slide-up 0.25s cubic-bezier(0.16, 1, 0.3, 1);
         }
       `}</style>
     </div>
