@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import jsQR from 'jsqr';
-import { parseVietQR, VIETNAM_BANKS, getVietQRDeepLink, getDirectAppScheme, getDynamicVietQRImage, ParsedVietQR } from '../utils/vietqr';
+import { parseVietQR, VIETNAM_BANKS, getVietQRDeepLink, getDirectAppScheme, getDirectQRScannerScheme, getDynamicVietQRImage, ParsedVietQR } from '../utils/vietqr';
 import { AccountType, TransactionType, SplitType } from '../types';
 
 interface QRScannerModalProps {
@@ -41,7 +41,9 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
   const [selectedPayerBank, setSelectedPayerBank] = useState<'tcb' | 'mb'>('tcb');
   const [autoLogToLedger, setAutoLogToLedger] = useState<boolean>(true);
   const [qrImageUrl, setQrImageUrl] = useState<string>('');
-  const [copiedAccount, setCopiedAccount] = useState<boolean>(false);
+  const [copiedField, setCopiedField] = useState<'account' | 'amount' | 'all' | null>(null);
+  const [isSavingQR, setIsSavingQR] = useState<boolean>(false);
+  const [saveQRSuccess, setSaveQRSuccess] = useState<boolean>(false);
 
   // Video & Canvas Refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -217,28 +219,96 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
     }
   };
 
-  // Download QR image helper
-  const downloadQR = async (imgUrl: string) => {
+  // Copy to clipboard helper with visual tick feedback
+  const handleCopyText = async (text: string, field: 'account' | 'amount' | 'all') => {
     try {
-      const response = await fetch(imgUrl);
+      if (navigator.clipboard) {
+        await navigator.clipboard.writeText(text);
+        setCopiedField(field);
+        setTimeout(() => setCopiedField(null), 3000);
+      }
+    } catch (e) {
+      console.warn('Clipboard copy error:', e);
+    }
+  };
+
+  // Download QR image helper with mobile Web Share support
+  const downloadQR = async (imgUrl: string) => {
+    setIsSavingQR(true);
+    const amountNum = parseSmartAmount(amountInput);
+    const fileName = `VietQR_${selectedBankCode.toUpperCase()}_${accountNumber}_${amountNum}.png`;
+
+    try {
+      const response = await fetch(imgUrl, { mode: 'cors' });
       const blob = await response.blob();
+
+      // Mobile Safari / Chrome Web Share API (Saves directly to Camera Roll/Photos)
+      const file = new File([blob], fileName, { type: 'image/png' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `VietQR ${formatCurrency(amountNum)}`,
+          text: `Mã VietQR chuyển ${formatCurrency(amountNum)} đến ${accountNumber}`
+        });
+        setSaveQRSuccess(true);
+        setTimeout(() => setSaveQRSuccess(false), 4000);
+        return true;
+      }
+
+      // Standard browser download
       const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = blobUrl;
-      link.download = `VietQR_${selectedBankCode.toUpperCase()}_${accountNumber}_${parseSmartAmount(amountInput)}.png`;
+      link.download = fileName;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 1000);
+      setTimeout(() => window.URL.revokeObjectURL(blobUrl), 2000);
+      setSaveQRSuccess(true);
+      setTimeout(() => setSaveQRSuccess(false), 4000);
       return true;
     } catch {
       window.open(imgUrl, '_blank');
+      setSaveQRSuccess(true);
+      setTimeout(() => setSaveQRSuccess(false), 4000);
       return false;
+    } finally {
+      setIsSavingQR(false);
+    }
+  };
+
+  // Open direct bank app / scanner
+  const openBankApp = (targetPayer: 'tcb' | 'mb', mode: 'deeplink' | 'scanner' | 'app') => {
+    const amountNum = parseSmartAmount(amountInput);
+    let url = '';
+
+    if (mode === 'scanner') {
+      url = getDirectQRScannerScheme(targetPayer);
+    } else if (mode === 'app') {
+      url = getDirectAppScheme(targetPayer);
+    } else {
+      url = getVietQRDeepLink({
+        appCode: targetPayer,
+        bankCodeOrBin: selectedBankCode,
+        accountNumber,
+        amount: amountNum,
+        note
+      });
+    }
+
+    try {
+      window.location.href = url;
+    } catch {
+      window.open(url, '_blank');
     }
   };
 
   // Execute Transfer to Bank App
-  const handleExecuteTransfer = async (targetPayer: 'tcb' | 'mb', autoDownloadQR: boolean = false) => {
+  const handleExecuteTransfer = async (
+    targetPayer: 'tcb' | 'mb', 
+    saveQRFirst: boolean = true,
+    launchMode: 'deeplink' | 'scanner' | 'app' = 'deeplink'
+  ) => {
     const amountNum = parseSmartAmount(amountInput);
     if (!accountNumber) {
       alert('Vui lòng nhập hoặc kiểm tra số tài khoản nhận tiền.');
@@ -261,36 +331,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
     setQrImageUrl(dynamicQr);
 
     // Auto copy account number to clipboard so banking app can detect it
-    try {
-      if (navigator.clipboard) {
-        await navigator.clipboard.writeText(accountNumber);
-        setCopiedAccount(true);
-        setTimeout(() => setCopiedAccount(false), 3000);
-      }
-    } catch {
-      // ignore
-    }
-
-    // Auto download QR image to user gallery if requested or if Techcombank
-    if (autoDownloadQR) {
-      downloadQR(dynamicQr);
-    }
-
-    // Official Web-to-App Deeplink URL
-    const deeplink = getVietQRDeepLink({
-      appCode: targetPayer,
-      bankCodeOrBin: selectedBankCode,
-      accountNumber,
-      amount: amountNum,
-      note
-    });
-
-    // Attempt to open the app via VietQR universal deeplink
-    try {
-      window.location.href = deeplink;
-    } catch {
-      window.open(deeplink, '_blank');
-    }
+    handleCopyText(accountNumber, 'account');
 
     // If auto log is checked, record transaction in ledger
     if (autoLogToLedger && onLogTransaction) {
@@ -304,7 +345,18 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
       });
     }
 
+    // Set step to success first so UI is ready when user comes back
     setStep('success');
+
+    // Auto save QR image if requested
+    if (saveQRFirst) {
+      downloadQR(dynamicQr);
+    }
+
+    // Launch bank app with small delay to allow save/share dialog to mount
+    setTimeout(() => {
+      openBankApp(targetPayer, launchMode);
+    }, saveQRFirst ? 600 : 100);
   };
 
   // Reset or initialize on open
@@ -508,17 +560,13 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                   {accountNumber && (
                     <button
                       type="button"
-                      onClick={() => {
-                        navigator.clipboard?.writeText(accountNumber);
-                        setCopiedAccount(true);
-                        setTimeout(() => setCopiedAccount(false), 2000);
-                      }}
+                      onClick={() => handleCopyText(accountNumber, 'account')}
                       className="mt-4 px-3 py-2 bg-white border border-black/[0.06] rounded-xl text-xs font-medium text-[#1d1d1f] hover:bg-black/5 active:scale-95 transition-all flex items-center gap-1"
                     >
                       <span className="material-symbols-rounded text-sm">
-                        {copiedAccount ? 'check' : 'content_copy'}
+                        {copiedField === 'account' ? 'check' : 'content_copy'}
                       </span>
-                      <span>{copiedAccount ? 'Đã chép' : 'Chép'}</span>
+                      <span>{copiedField === 'account' ? 'Đã chép' : 'Chép'}</span>
                     </button>
                   )}
                 </div>
@@ -630,13 +678,13 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                       </div>
                       <div className="text-left">
                         <p className="font-semibold text-sm">Chuyển qua Techcombank</p>
-                        <p className="text-[10px] text-white/80">Tải mã QR tự điền số tiền + Mở app</p>
+                        <p className="text-[10px] text-white/80">Lưu mã QR chứa {formatCurrency(parseSmartAmount(amountInput))} + Mở app</p>
                       </div>
                     </div>
                     <span className="material-symbols-rounded text-lg">arrow_forward</span>
                   </button>
-                  <p className="text-[10px] text-[#86868b] text-center px-2">
-                    💡 Techcombank bảo mật: Tải mã QR để vào app quét ảnh tự động điền 100% số tiền
+                  <p className="text-[10px] text-[#86868b] text-center px-1">
+                    ⚡ Tự động tải mã QR để vào app quét ảnh điền đúng 100% số tiền
                   </p>
                 </div>
 
@@ -644,7 +692,7 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                 <div className="space-y-1.5">
                   <button
                     type="button"
-                    onClick={() => handleExecuteTransfer('mb', false)}
+                    onClick={() => handleExecuteTransfer('mb', true)}
                     disabled={!accountNumber || parseSmartAmount(amountInput) <= 0}
                     className="w-full py-3.5 px-4 bg-gradient-to-r from-[#003399] to-[#002266] hover:opacity-95 active:scale-[0.98] text-white rounded-2xl font-medium text-xs shadow-sm flex items-center justify-between transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                   >
@@ -654,13 +702,13 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
                       </div>
                       <div className="text-left">
                         <p className="font-semibold text-sm">Chuyển qua MB Bank</p>
-                        <p className="text-[10px] text-white/80">Mở thẳng màn hình chuyển tiền MB</p>
+                        <p className="text-[10px] text-white/80">Lưu mã QR chứa {formatCurrency(parseSmartAmount(amountInput))} + Mở app</p>
                       </div>
                     </div>
                     <span className="material-symbols-rounded text-lg">arrow_forward</span>
                   </button>
-                  <p className="text-[10px] text-[#86868b] text-center px-2">
-                    💡 MB Bank hỗ trợ mở trực tiếp màn hình chuyển khoản qua VietQR
+                  <p className="text-[10px] text-[#86868b] text-center px-1">
+                    ⚡ Tự động tải mã QR để vào app quét ảnh điền đúng 100% số tiền
                   </p>
                 </div>
 
@@ -681,105 +729,164 @@ export const QRScannerModal: React.FC<QRScannerModalProps> = ({
             </div>
           )}
 
-          {/* STEP 3: SUCCESS / APP SWITCH HELPER & AUTOFILL GUIDE */}
+          {/* STEP 3: SUCCESS / WHY HOMEPAGE & HOW TO AUTO-FILL MONEY 100% */}
           {step === 'success' && (
             <div className="py-2 text-center space-y-4">
-              <div className="w-12 h-12 rounded-full bg-[#34c759]/10 text-[#34c759] flex items-center justify-center mx-auto">
-                <span className="material-symbols-rounded text-2xl">check_circle</span>
+              <div className="w-12 h-12 rounded-full bg-[#0071e3]/10 text-[#0071e3] flex items-center justify-center mx-auto">
+                <span className="material-symbols-rounded text-2xl">sync_alt</span>
               </div>
 
               <div>
                 <h4 className="text-base font-semibold text-[#1d1d1f]">
-                  Đang mở app {selectedPayerBank === 'tcb' ? 'Techcombank' : 'MB Bank'}
+                  Đang kết nối app {selectedPayerBank === 'tcb' ? 'Techcombank' : 'MB Bank'}
                 </h4>
                 <p className="text-xs text-[#86868b] mt-1 max-w-xs mx-auto">
-                  Số tiền: <strong className="text-[#1d1d1f]">{formatCurrency(parseSmartAmount(amountInput))}</strong>
+                  Số tiền cần chuyển: <strong className="text-[#1d1d1f] text-sm">{formatCurrency(parseSmartAmount(amountInput))}</strong>
                   <br />
-                  Đến STK: <strong className="text-[#1d1d1f] font-mono">{accountNumber}</strong>
+                  STK nhận: <strong className="text-[#1d1d1f] font-mono">{accountNumber}</strong>
                 </p>
               </div>
 
-              {/* Instructions Guide for Techcombank & MB Autofill */}
-              <div className="bg-[#f5f5f7] p-4 rounded-3xl border border-black/[0.05] text-left space-y-2.5">
-                <div className="flex items-center gap-2 text-[#1d1d1f] font-semibold text-xs">
-                  <span className="material-symbols-rounded text-base text-[#0071e3]">auto_fix_high</span>
-                  <span>Hướng dẫn tự động điền 100% số tiền:</span>
+              {/* Security Policy Clarification Box */}
+              <div className="bg-[#fff9e6] border border-[#ffe58f] p-3.5 rounded-2xl text-left space-y-1.5 shadow-sm">
+                <div className="flex items-center gap-2 text-[#d48806] font-semibold text-xs">
+                  <span className="material-symbols-rounded text-base">security</span>
+                  <span>Vì sao ngân hàng mở ra ở Trang chủ?</span>
+                </div>
+                <p className="text-[11px] text-[#874d00] leading-relaxed">
+                  Vì lý do bảo mật sinh trắc học bắt buộc, các app ngân hàng <strong>không cho phép trang web tự ý can thiệp điền số tiền trực tiếp</strong> từ link bên ngoài để chống gian lận. Bạn làm theo 3 bước cực nhanh dưới đây:
+                </p>
+              </div>
+
+              {/* 3-Step 100% Autofill Guide */}
+              <div className="bg-[#f5f5f7] p-4 rounded-3xl border border-black/[0.05] text-left space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-[#1d1d1f] font-semibold text-xs">
+                    <span className="material-symbols-rounded text-base text-[#0071e3]">auto_fix_high</span>
+                    <span>Tự động điền 100% số tiền qua Quét ảnh:</span>
+                  </div>
+                  {saveQRSuccess && (
+                    <span className="text-[10px] text-[#34c759] font-bold bg-[#34c759]/15 px-2 py-0.5 rounded-full flex items-center gap-1 animate-pulse">
+                      <span className="material-symbols-rounded text-xs">check</span>
+                      Đã lưu ảnh QR
+                    </span>
+                  )}
                 </div>
                 
                 <div className="space-y-2 text-[11px] text-[#48484a] leading-relaxed">
-                  <div className="flex items-start gap-2">
-                    <span className="w-4 h-4 rounded-full bg-[#1d1d1f] text-white flex items-center justify-center text-[9px] font-bold shrink-0 mt-0.5">1</span>
-                    <span>Bấm nút <strong>"Tải ảnh mã QR"</strong> bên dưới vào thư viện ảnh của máy.</span>
+                  <div className="flex items-start gap-2.5">
+                    <span className="w-5 h-5 rounded-full bg-[#1d1d1f] text-white flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">1</span>
+                    <span>Bấm nút <strong>"Lưu ảnh QR vào máy"</strong> bên dưới (ảnh chứa sẵn số tiền {formatCurrency(parseSmartAmount(amountInput))}).</span>
                   </div>
-                  <div className="flex items-start gap-2">
-                    <span className="w-4 h-4 rounded-full bg-[#1d1d1f] text-white flex items-center justify-center text-[9px] font-bold shrink-0 mt-0.5">2</span>
-                    <span>Mở app {selectedPayerBank === 'tcb' ? 'Techcombank' : 'MB Bank'}, bấm biểu tượng <strong>Quét mã QR</strong> ở góc trên.</span>
+                  <div className="flex items-start gap-2.5">
+                    <span className="w-5 h-5 rounded-full bg-[#1d1d1f] text-white flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">2</span>
+                    <span>Mở app {selectedPayerBank === 'tcb' ? 'Techcombank' : 'MB Bank'}, bấm biểu tượng <strong>Quét mã QR</strong> ở góc trên màn hình.</span>
                   </div>
-                  <div className="flex items-start gap-2">
-                    <span className="w-4 h-4 rounded-full bg-[#1d1d1f] text-white flex items-center justify-center text-[9px] font-bold shrink-0 mt-0.5">3</span>
-                    <span>Chọn <strong>"Chọn ảnh từ thư viện"</strong> (chọn ảnh QR vừa tải). App sẽ <strong>tự động điền đúng 100% số tiền {formatCurrency(parseSmartAmount(amountInput))}</strong> mà không cần gõ lại!</span>
+                  <div className="flex items-start gap-2.5">
+                    <span className="w-5 h-5 rounded-full bg-[#1d1d1f] text-white flex items-center justify-center text-[10px] font-bold shrink-0 mt-0.5">3</span>
+                    <span>Bấm <strong>"Chọn ảnh từ thư viện"</strong> (chọn ảnh QR vừa lưu ở đầu album). 👉 <strong>App sẽ tự động mở màn hình chuyển tiền và điền đúng {formatCurrency(parseSmartAmount(amountInput))} 100%!</strong></span>
                   </div>
                 </div>
 
-                {/* Quick Action Buttons inside Guide */}
-                <div className="pt-2 grid grid-cols-2 gap-2">
+                {/* Direct Action Buttons for Saving QR */}
+                <div className="pt-1">
                   <button
                     type="button"
                     onClick={() => qrImageUrl && downloadQR(qrImageUrl)}
-                    className="py-2.5 px-3 bg-white text-[#1d1d1f] border border-black/[0.08] hover:bg-black/5 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
+                    disabled={isSavingQR}
+                    className="w-full py-2.5 px-3 bg-white text-[#1d1d1f] border border-black/[0.08] hover:bg-black/5 active:scale-95 font-semibold rounded-xl text-xs flex items-center justify-center gap-2 shadow-sm transition-all"
                   >
-                    <span className="material-symbols-rounded text-base text-[#0071e3]">download</span>
-                    Tải ảnh mã QR
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.clipboard?.writeText(accountNumber);
-                      setCopiedAccount(true);
-                      setTimeout(() => setCopiedAccount(false), 2000);
-                    }}
-                    className="py-2.5 px-3 bg-white text-[#1d1d1f] border border-black/[0.08] hover:bg-black/5 font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm active:scale-95 transition-all"
-                  >
-                    <span className="material-symbols-rounded text-base">content_copy</span>
-                    {copiedAccount ? 'Đã sao chép' : 'Chép STK'}
+                    <span className="material-symbols-rounded text-base text-[#0071e3]">
+                      {saveQRSuccess ? 'check_circle' : 'download'}
+                    </span>
+                    <span>
+                      {isSavingQR ? 'Đang lưu ảnh QR...' : saveQRSuccess ? 'Đã lưu ảnh QR vào thư viện máy ✓' : 'Lưu ảnh QR có sẵn số tiền vào máy'}
+                    </span>
                   </button>
                 </div>
               </div>
 
-              {/* Dynamic QR Fallback Preview */}
+              {/* 1-Tap Copy Shortcuts (Phương án 2: Chép dán nhanh) */}
+              <div className="bg-white p-3.5 rounded-2xl border border-black/[0.06] text-left space-y-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-[#86868b]">
+                  Sao chép nhanh nếu bạn tự nhập trong app
+                </p>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleCopyText(parseSmartAmount(amountInput).toString(), 'amount')}
+                    className="py-2 px-3 bg-[#f5f5f7] hover:bg-[#e8e8ed] active:scale-95 rounded-xl text-left border border-black/[0.04] transition-all flex items-center justify-between"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-[9px] text-[#86868b] uppercase font-semibold">Số tiền</p>
+                      <p className="text-xs font-semibold text-[#1d1d1f] truncate">{formatCurrency(parseSmartAmount(amountInput))}</p>
+                    </div>
+                    <span className="material-symbols-rounded text-sm text-[#0071e3] shrink-0">
+                      {copiedField === 'amount' ? 'check' : 'content_copy'}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleCopyText(accountNumber, 'account')}
+                    className="py-2 px-3 bg-[#f5f5f7] hover:bg-[#e8e8ed] active:scale-95 rounded-xl text-left border border-black/[0.04] transition-all flex items-center justify-between"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-[9px] text-[#86868b] uppercase font-semibold">Số tài khoản</p>
+                      <p className="text-xs font-semibold text-[#1d1d1f] truncate font-mono">{accountNumber}</p>
+                    </div>
+                    <span className="material-symbols-rounded text-sm text-[#0071e3] shrink-0">
+                      {copiedField === 'account' ? 'check' : 'content_copy'}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Dynamic QR Preview */}
               {qrImageUrl && (
-                <div className="space-y-1.5">
+                <div className="bg-[#f5f5f7] p-3 rounded-2xl border border-black/[0.05] inline-block max-w-[240px] mx-auto space-y-1">
                   <img
                     src={qrImageUrl}
                     alt="VietQR Dynamic"
-                    className="w-48 h-48 mx-auto rounded-2xl bg-white p-2 shadow-sm border border-black/[0.06]"
+                    className="w-44 h-44 mx-auto rounded-xl bg-white p-2 shadow-sm border border-black/[0.06]"
                   />
-                  <p className="text-[10px] text-[#86868b]">Mã VietQR động chứa số tiền {formatCurrency(parseSmartAmount(amountInput))}</p>
+                  <p className="text-[10px] text-[#86868b]">Mã VietQR chứa {formatCurrency(parseSmartAmount(amountInput))}</p>
                 </div>
               )}
 
-              {/* Action Buttons: Open App Again & Finish */}
+              {/* Primary App Launch Action Buttons */}
               <div className="space-y-2 pt-1">
+                {/* Direct QR Scanner Scheme */}
                 <button
                   type="button"
-                  onClick={() => handleExecuteTransfer(selectedPayerBank, false)}
-                  className={`w-full py-3.5 text-white font-medium rounded-2xl text-xs shadow-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-all ${
+                  onClick={() => openBankApp(selectedPayerBank, 'scanner')}
+                  className={`w-full py-3.5 text-white font-semibold rounded-2xl text-xs shadow-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-all ${
                     selectedPayerBank === 'tcb' 
                       ? 'bg-gradient-to-r from-[#e3001b] to-[#b30015]' 
                       : 'bg-gradient-to-r from-[#003399] to-[#002266]'
                   }`}
                 >
-                  <span className="material-symbols-rounded text-base">open_in_new</span>
-                  Mở lại app {selectedPayerBank === 'tcb' ? 'Techcombank' : 'MB Bank'}
+                  <span className="material-symbols-rounded text-base">qr_code_scanner</span>
+                  <span>Mở thẳng Quét QR của {selectedPayerBank === 'tcb' ? 'Techcombank' : 'MB Bank'}</span>
                 </button>
 
+                {/* Open Normal App Scheme */}
+                <button
+                  type="button"
+                  onClick={() => openBankApp(selectedPayerBank, 'app')}
+                  className="w-full py-2.5 bg-white border border-black/[0.08] hover:bg-black/5 text-[#1d1d1f] font-semibold rounded-xl text-xs flex items-center justify-center gap-1.5 transition-all active:scale-[0.98]"
+                >
+                  <span className="material-symbols-rounded text-base text-[#86868b]">open_in_new</span>
+                  <span>Mở ứng dụng {selectedPayerBank === 'tcb' ? 'Techcombank' : 'MB Bank'}</span>
+                </button>
+
+                {/* Finished Button */}
                 <button
                   type="button"
                   onClick={onClose}
                   className="w-full py-3 bg-[#f5f5f7] hover:bg-[#e8e8ed] text-[#1d1d1f] font-medium rounded-2xl text-xs transition-all"
                 >
-                  Đã chuyển xong & Quay lại
+                  Đã chuyển xong & Đóng lại
                 </button>
               </div>
             </div>

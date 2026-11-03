@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Transaction, SplitType, TransactionType } from '../types';
+import { Transaction, SplitType, TransactionType, AccountType } from '../types';
 import { MEO_NAME } from '../constants';
 // @ts-ignore
 import html2canvas from 'html2canvas';
@@ -7,7 +7,7 @@ import html2canvas from 'html2canvas';
 interface BillGeneratorProps {
   transactions: Transaction[];
   onClose: () => void;
-  onSettle: (txIds: string[], finalPayment: number, surplus: number) => void;
+  onSettle: (txIds: string[], finalPayment: number, surplus: number, targetAccount: AccountType) => void;
   isHistorical?: boolean; // Chế độ xem lại lịch sử
   historicalDate?: string; // Ngày của bill cũ
   historicalTotalPaid?: number; // Số tiền đã trả trong bill cũ
@@ -24,6 +24,11 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
   const [isCapturing, setIsCapturing] = useState(false);
   const [step, setStep] = useState<'preview' | 'confirm'>('preview');
   const [payAmount, setPayAmount] = useState('');
+  const [selectedTargetAccount, setSelectedTargetAccount] = useState<AccountType>(AccountType.MB);
+  const [previewImageUrl, setPreviewImageUrl] = useState<string | null>(null);
+  const [cachedBlob, setCachedBlob] = useState<Blob | null>(null);
+  const [cachedFileName, setCachedFileName] = useState<string>('');
+  const [shareSuccess, setShareSuccess] = useState<boolean>(false);
 
   const BASE_FEE = 0; // Updated to 0 as requested
 
@@ -102,23 +107,68 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
     }
 
     try {
-        await new Promise(resolve => setTimeout(resolve, 100));
+        await new Promise(resolve => setTimeout(resolve, 150));
 
+        // Use scale: 2 for sharp Retina quality without exceeding iOS Safari canvas limits
         const canvas = await html2canvas(element, {
-            scale: 3,
+            scale: 2,
             backgroundColor: '#ffffff',
             useCORS: true,
+            allowTaint: true,
             logging: false,
         });
-        
-        const link = document.createElement('a');
+
         const dateStr = historicalDate || new Date().toISOString();
-        link.download = `Hoa-don-${MEO_NAME}-${new Date(dateStr).toLocaleDateString('vi-VN').replace(/\//g, '-')}.png`;
-        link.href = canvas.toDataURL('image/png');
-        link.click();
+        const fileName = `Hoa-don-${MEO_NAME}-${new Date(dateStr).toLocaleDateString('vi-VN').replace(/\//g, '-')}.png`;
+        const dataUrl = canvas.toDataURL('image/png');
+        setPreviewImageUrl(dataUrl);
+        setCachedFileName(fileName);
+
+        const blob: Blob | null = await new Promise((resolve) => {
+            canvas.toBlob((b: Blob | null) => resolve(b), 'image/png', 0.95);
+        });
+
+        if (blob) {
+            setCachedBlob(blob);
+            const file = new File([blob], fileName, { type: 'image/png' });
+
+            // iOS Safari & PWA: Native Web Share API Level 2 to save directly to Apple Photos
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                try {
+                    await navigator.share({
+                        files: [file],
+                        title: `Hoá đơn đối soát - ${MEO_NAME}`,
+                        text: `Hoá đơn đối soát cùng ${MEO_NAME}`
+                    });
+                    setShareSuccess(true);
+                    setTimeout(() => setShareSuccess(false), 3000);
+                    return;
+                } catch (shareErr: any) {
+                    // User dismissed share sheet or cancelled: preview modal remains open so user can long-press to save
+                    console.log('Share dismissed or cancelled:', shareErr);
+                    return;
+                }
+            }
+
+            // Fallback for desktop Chrome / Firefox / Android
+            try {
+                const blobUrl = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.download = fileName;
+                link.href = blobUrl;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+                setShareSuccess(true);
+                setTimeout(() => setShareSuccess(false), 3000);
+            } catch (dlErr) {
+                console.warn('Direct download link failed, relying on preview modal:', dlErr);
+            }
+        }
     } catch (err) {
         console.error("Export failed", err);
-        alert("Không thể xuất ảnh. Vui lòng thử lại.");
+        alert("Không thể xuất ảnh hoá đơn. Vui lòng thử lại.");
     } finally {
         scrollContainer.style.overflow = originalOverflow;
         scrollContainer.style.height = originalHeight;
@@ -133,6 +183,34 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
     }
   };
 
+  const handleShareAgain = async () => {
+    if (!cachedBlob) return;
+    const file = new File([cachedBlob], cachedFileName || 'Hoa-don.png', { type: 'image/png' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+            await navigator.share({
+                files: [file],
+                title: `Hoá đơn đối soát - ${MEO_NAME}`,
+                text: `Hoá đơn đối soát cùng ${MEO_NAME}`
+            });
+            setShareSuccess(true);
+            setTimeout(() => setShareSuccess(false), 3000);
+        } catch {
+            // ignore
+        }
+    } else {
+        // Fallback download
+        const blobUrl = URL.createObjectURL(cachedBlob);
+        const link = document.createElement('a');
+        link.download = cachedFileName || 'Hoa-don.png';
+        link.href = blobUrl;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+    }
+  };
+
   const handleInitSettle = () => {
       setPayAmount(isCredit ? '0' : formatNumberInput(totalDebt.toString()));
       setStep('confirm');
@@ -141,23 +219,23 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
   const handleConfirmSettle = () => {
       const finalPayment = parseNumber(payAmount);
       const surplus = finalPayment - totalDebt;
-      onSettle(activeTransactions.map(d => d.id), finalPayment, surplus);
+      onSettle(activeTransactions.map(d => d.id), finalPayment, surplus, selectedTargetAccount);
   };
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 pt-safe pb-safe backdrop-blur-md">
       <div className="w-full max-w-md bg-white rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] border border-black/[0.08]">
         {/* Apple Style Header */}
-        <div className="bg-[#1d1d1f] px-6 py-4 text-white flex justify-between items-center shrink-0">
+        <div className="bg-white border-b border-black/[0.06] px-6 py-4 text-[#1d1d1f] flex justify-between items-center shrink-0">
           <div>
             <p className="text-[10px] text-[#86868b] uppercase tracking-wider font-semibold">Quyết toán chi phí</p>
-            <h2 className="font-semibold text-base text-white">
+            <h2 className="font-semibold text-base text-[#1d1d1f]">
               {isHistorical ? 'Hoá đơn thanh toán' : (step === 'preview' ? 'Đối soát cùng Mèo' : 'Xác nhận chuyển tiền')}
             </h2>
           </div>
           <button 
             onClick={onClose} 
-            className="w-8 h-8 flex items-center justify-center bg-white/10 hover:bg-white/20 active:scale-95 rounded-full transition-colors text-white"
+            className="w-8 h-8 flex items-center justify-center bg-[#f5f5f7] hover:bg-black/5 active:scale-95 rounded-full transition-colors text-[#86868b]"
           >
             <span className="material-symbols-rounded text-sm">close</span>
           </button>
@@ -275,11 +353,14 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
                         className="w-full py-3 bg-[#f5f5f7] hover:bg-[#e8e8ed] active:scale-[0.98] text-[#1d1d1f] font-medium rounded-full text-sm transition-all flex justify-center items-center gap-2 border border-black/[0.06]"
                     >
                         {isCapturing ? (
-                            <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin"></span>
+                            <span className="flex items-center gap-2">
+                                <span className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin"></span>
+                                <span>Đang kết xuất ảnh...</span>
+                            </span>
                         ) : (
                             <>
-                                <span className="material-symbols-rounded text-base">download</span>
-                                Tải ảnh hoá đơn (PNG)
+                                <span className="material-symbols-rounded text-base text-[#0071e3]">ios_share</span>
+                                <span>Lưu ảnh hoá đơn (iPhone / Tất cả thiết bị)</span>
                             </>
                         )}
                     </button>
@@ -296,20 +377,93 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
                 </div>
             </>
         ) : (
-            <div className="p-6 bg-white flex-1 flex flex-col justify-between">
-                <div className="space-y-6">
+            <div className="p-6 bg-white flex-1 flex flex-col justify-between overflow-y-auto">
+                <div className="space-y-5">
                     <div className="p-5 rounded-2xl bg-[#f5f5f7] border border-black/[0.04] text-center">
                         <p className="text-xs text-[#86868b] font-medium mb-1">
-                            {isCredit ? 'Số tiền dư hiện có của Mèo' : 'Số tiền Mèo cần thanh toán'}
+                            {isCredit ? 'Số dư kết chuyển của Mèo' : 'Số tiền Mèo cần thanh toán'}
                         </p>
-                        <p className="text-3xl font-semibold text-[#1d1d1f] tracking-tight">
+                        <p className={`text-3xl font-semibold tracking-tight ${isCredit ? 'text-[#34c759]' : 'text-[#1d1d1f]'}`}>
                             {formatCurrency(Math.abs(totalDebt))}
                         </p>
+                        {isCredit && (
+                            <p className="text-[11px] text-[#34c759] mt-1 font-medium">
+                                Mèo đang có số dư dương để kết chuyển
+                            </p>
+                        )}
+                    </div>
+
+                    {/* 2 Lựa chọn: MB Bank hoặc Techcombank */}
+                    <div>
+                        <label className="block text-xs font-semibold text-[#86868b] uppercase tracking-wider mb-2">
+                            {isCredit ? 'Cộng số dư vào tài khoản' : 'Nhận tiền thanh toán vào ví'}
+                        </label>
+                        <div className="grid grid-cols-2 gap-2.5">
+                            {/* Option 1: MB Bank */}
+                            <button
+                                type="button"
+                                onClick={() => setSelectedTargetAccount(AccountType.MB)}
+                                className={`py-3.5 px-3 rounded-2xl border text-left transition-all flex items-center justify-between active:scale-[0.98] ${
+                                    selectedTargetAccount === AccountType.MB
+                                        ? 'bg-[#003399]/10 border-[#003399] shadow-sm'
+                                        : 'bg-[#f5f5f7] border-black/[0.06] hover:bg-black/5'
+                                }`}
+                            >
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-xs shrink-0 shadow-sm ${
+                                        selectedTargetAccount === AccountType.MB 
+                                            ? 'bg-[#003399] text-white' 
+                                            : 'bg-white text-[#003399] border border-black/[0.08]'
+                                    }`}>
+                                        MB
+                                    </div>
+                                    <div className="min-w-0">
+                                        <p className={`text-xs font-bold leading-tight ${selectedTargetAccount === AccountType.MB ? 'text-[#003399]' : 'text-[#1d1d1f]'}`}>
+                                            MB Bank
+                                        </p>
+                                        <p className="text-[10px] text-[#86868b] truncate">Quân đội</p>
+                                    </div>
+                                </div>
+                                {selectedTargetAccount === AccountType.MB && (
+                                    <span className="material-symbols-rounded text-base text-[#003399] shrink-0">check_circle</span>
+                                )}
+                            </button>
+
+                            {/* Option 2: Techcombank */}
+                            <button
+                                type="button"
+                                onClick={() => setSelectedTargetAccount(AccountType.TCB)}
+                                className={`py-3.5 px-3 rounded-2xl border text-left transition-all flex items-center justify-between active:scale-[0.98] ${
+                                    selectedTargetAccount === AccountType.TCB
+                                        ? 'bg-[#e3001b]/10 border-[#e3001b] shadow-sm'
+                                        : 'bg-[#f5f5f7] border-black/[0.06] hover:bg-black/5'
+                                }`}
+                            >
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-black text-xs shrink-0 shadow-sm ${
+                                        selectedTargetAccount === AccountType.TCB 
+                                            ? 'bg-[#e3001b] text-white' 
+                                            : 'bg-white text-[#e3001b] border border-black/[0.08]'
+                                    }`}>
+                                        TCB
+                                    </div>
+                                    <div className="min-w-0">
+                                        <p className={`text-xs font-bold leading-tight ${selectedTargetAccount === AccountType.TCB ? 'text-[#e3001b]' : 'text-[#1d1d1f]'}`}>
+                                            Techcombank
+                                        </p>
+                                        <p className="text-[10px] text-[#86868b] truncate">Kỹ thương</p>
+                                    </div>
+                                </div>
+                                {selectedTargetAccount === AccountType.TCB && (
+                                    <span className="material-symbols-rounded text-base text-[#e3001b] shrink-0">check_circle</span>
+                                )}
+                            </button>
+                        </div>
                     </div>
 
                     <div>
                         <label className="block text-xs font-semibold text-[#86868b] uppercase tracking-wider mb-2">
-                            Số tiền Mèo chuyển khoản (MB)
+                            Số tiền thực chuyển (Cộng vào {selectedTargetAccount === AccountType.TCB ? 'Techcombank' : 'MB Bank'})
                         </label>
                         <div className="relative">
                             <input 
@@ -345,12 +499,78 @@ export const BillGenerator: React.FC<BillGeneratorProps> = ({
                         onClick={handleConfirmSettle}
                         className="flex-[2] py-3 bg-[#1d1d1f] hover:bg-black text-white font-medium rounded-full text-sm active:scale-[0.98] transition-all shadow-sm"
                     >
-                        Hoàn tất chốt sổ
+                        {isCredit 
+                            ? `Cộng vào ${selectedTargetAccount === AccountType.TCB ? 'Techcombank' : 'MB Bank'}` 
+                            : `Hoàn tất (Vào ${selectedTargetAccount === AccountType.TCB ? 'TCB' : 'MB'})`
+                        }
                     </button>
                 </div>
             </div>
         )}
       </div>
+
+      {/* iOS & Mobile Image Preview & Save Modal */}
+      {previewImageUrl && (
+        <div className="fixed inset-0 z-60 bg-black/70 backdrop-blur-md flex items-center justify-center p-4 pt-safe pb-safe animate-fade-in">
+          <div className="bg-white w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[92vh] border border-black/[0.08]">
+            {/* Header */}
+            <div className="px-5 py-3.5 bg-white border-b border-black/[0.06] flex items-center justify-between">
+              <div>
+                <p className="text-[10px] text-[#86868b] uppercase tracking-wider font-semibold">Hoá đơn đã tạo</p>
+                <h3 className="text-sm font-semibold text-[#1d1d1f]">Xem & Lưu ảnh hoá đơn</h3>
+              </div>
+              <button
+                onClick={() => setPreviewImageUrl(null)}
+                className="w-7 h-7 rounded-full bg-[#f5f5f7] hover:bg-black/5 active:scale-95 flex items-center justify-center text-[#86868b]"
+              >
+                <span className="material-symbols-rounded text-sm">close</span>
+              </button>
+            </div>
+
+            {/* Scrollable image view */}
+            <div className="flex-1 overflow-y-auto p-4 bg-[#f5f5f7] flex flex-col items-center">
+              <img
+                src={previewImageUrl}
+                alt="Ảnh hoá đơn đối soát"
+                className="w-full max-w-[320px] rounded-2xl shadow-sm border border-black/[0.06] bg-white pointer-events-auto"
+              />
+
+              {/* iPhone save instruction */}
+              <div className="mt-3 w-full max-w-[320px] bg-white p-3.5 rounded-2xl border border-black/[0.06] text-left space-y-1.5 shadow-sm">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-[#0071e3]">
+                  <span className="material-symbols-rounded text-base">touch_app</span>
+                  <span>Mẹo lưu ảnh trên iPhone:</span>
+                </div>
+                <p className="text-[11px] text-[#555] leading-relaxed">
+                  <strong>Chạm và giữ (Long-press) vào ảnh</strong> khoảng 1 giây ➔ Chọn <strong>"Lưu vào Ảnh" (Save to Photos)</strong> hoặc chia sẻ trực tiếp qua Zalo / Tin nhắn.
+                </p>
+              </div>
+            </div>
+
+            {/* Action buttons */}
+            <div className="p-3.5 bg-white border-t border-black/[0.06] space-y-2">
+              <button
+                type="button"
+                onClick={handleShareAgain}
+                className="w-full py-3 bg-[#1d1d1f] hover:bg-black active:scale-[0.98] text-white font-medium rounded-full text-xs flex items-center justify-center gap-1.5 shadow-sm transition-all"
+              >
+                <span className="material-symbols-rounded text-base text-[#34c759]">
+                  {shareSuccess ? 'check_circle' : 'ios_share'}
+                </span>
+                <span>{shareSuccess ? 'Đã mở menu chia sẻ / lưu ảnh' : 'Lưu vào Ảnh / Chia sẻ (Menu iOS)'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPreviewImageUrl(null)}
+                className="w-full py-2.5 bg-[#f5f5f7] hover:bg-[#e8e8ed] active:scale-[0.98] text-[#1d1d1f] font-medium rounded-full text-xs transition-all"
+              >
+                Đóng lại
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

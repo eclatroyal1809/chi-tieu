@@ -200,7 +200,27 @@ export function getDirectAppScheme(appCode: 'tcb' | 'mb'): string {
   if (appCode === 'tcb') {
     return 'techcombank://';
   }
-  return 'mbmobile://';
+  return 'mbbank://';
+}
+
+/**
+ * Direct QR Scanner Schemes for bank apps
+ */
+export function getDirectQRScannerScheme(appCode: 'tcb' | 'mb'): string {
+  if (appCode === 'tcb') {
+    return 'tcb://qr';
+  }
+  return 'mbbank://qr';
+}
+
+/**
+ * Direct Transfer Schemes for bank apps
+ */
+export function getDirectTransferScheme(appCode: 'tcb' | 'mb'): string {
+  if (appCode === 'tcb') {
+    return 'techcombank://transfer';
+  }
+  return 'mbbank://transfer';
 }
 
 /**
